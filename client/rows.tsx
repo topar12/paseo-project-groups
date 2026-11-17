@@ -6,9 +6,9 @@ import {
   type ProjectRef,
   type WorkspaceRef,
 } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/ui";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { Icon, TextInput } from "@getpaseo/plugin/client/ui";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useDrag, useDragHandle, useDragSlot } from "./drag";
 import { DecorIcon, useDecorations } from "./decor";
 import { useT } from "./i18n";
@@ -203,7 +203,8 @@ export function GroupHeader({
   const slotRef = useDragSlot(`g:${group.id}`, { kind: "group", groupId: group.id });
   const handle = useDragHandle({ kind: "group", id: group.id, label: group.name });
   const hover = useHover(view.layout.compact);
-  const [draft, setDraft] = useState(group.name);
+  const [initialName, setInitialName] = useState(group.name);
+  const draftName = useRef(group.name);
   const muted = view.theme.colors.foregroundMuted;
   const t = useT();
   const decorations = useDecorations();
@@ -219,11 +220,12 @@ export function GroupHeader({
   }, [controller, onToggle, group.id]);
 
   const beginRename = useCallback(() => {
-    setDraft(group.name);
+    draftName.current = group.name;
+    setInitialName(group.name);
     onStartRename(group.id);
   }, [group.id, group.name, onStartRename]);
 
-  const submit = useCallback(() => onRename(group.id, draft), [draft, group.id, onRename]);
+  const submit = useCallback(() => onRename(group.id, draftName.current), [group.id, onRename]);
 
   if (renaming) {
     return (
@@ -233,8 +235,13 @@ export function GroupHeader({
           accessibilityLabel={t("group.nameLabel")}
           autoFocus
           selectTextOnFocus
-          value={draft}
-          onChangeText={setDraft}
+          autoCapitalize="none"
+          autoCorrect={false}
+          // Avoid sending intermediate IME text back to the native input.
+          defaultValue={initialName}
+          onChangeText={(text) => {
+            draftName.current = text;
+          }}
           onSubmitEditing={submit}
           onBlur={submit}
           onKeyPress={(event) => {

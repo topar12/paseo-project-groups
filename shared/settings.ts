@@ -39,7 +39,7 @@ export const TEXT_SIZES = [11, 12, 13, 14, 15] as const;
 export const DENSITIES = ["compact", "comfortable", "spacious"] as const;
 export const INDENTS = ["narrow", "normal", "wide"] as const;
 export const GROUP_SPACINGS = ["none", "small", "medium", "large", "xlarge"] as const;
-export const LANGUAGES = ["auto", "en", "ko"] as const;
+export const LANGUAGES = ["auto", "en", "ko", "zh-CN"] as const;
 
 /** Sidebar look. Device scope because text size and spacing depend on the screen. */
 export const appearanceDocument = defineSettings({

@@ -7,9 +7,9 @@ import {
   type ProjectRef,
   type WorkspaceRef,
 } from "@getpaseo/plugin/client";
-import { Icon, Modal, copyText, useToast } from "@getpaseo/plugin/client/ui";
-import { useState, type ReactNode } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Icon, Modal, TextInput, copyText, useToast } from "@getpaseo/plugin/client/ui";
+import { useRef, useState, type ReactNode } from "react";
+import { Pressable, Text, View } from "react-native";
 import { useT } from "./i18n";
 import { groupOfProject } from "./model";
 import type { ProjectGroup } from "../shared/settings";
@@ -296,7 +296,8 @@ export function WorkspaceMenuDialog({
     worktree: item.kind === "worktree",
   }));
   const [step, setStep] = useState<"menu" | "rename" | "archive">("menu");
-  const [draft, setDraft] = useState("");
+  const [initialName, setInitialName] = useState("");
+  const draftName = useRef("");
   const [busy, setBusy] = useState(false);
 
   if (!workspace) return null;
@@ -323,7 +324,7 @@ export function WorkspaceMenuDialog({
   if (step === "rename") {
     const submit = () =>
       void run(
-        () => handle().setTitle(draft.trim() ? draft.trim() : null),
+        () => handle().setTitle(draftName.current.trim() || null),
         t("workspace.renamed"),
         t("workspace.renameFailed"),
       );
@@ -334,9 +335,15 @@ export function WorkspaceMenuDialog({
             accessibilityLabel={t("workspace.nameLabel")}
             autoFocus
             selectTextOnFocus
-            value={draft}
-            onChangeText={setDraft}
+            autoCapitalize="none"
+            autoCorrect={false}
+            // Keep the native IME in charge of composing text; only seed the input on mount.
+            defaultValue={initialName}
+            onChangeText={(text) => {
+              draftName.current = text;
+            }}
             onSubmitEditing={submit}
+            editable={!busy}
             placeholder={t("workspace.namePlaceholder")}
             placeholderTextColor={theme.colors.foregroundMuted}
             style={{
@@ -411,7 +418,9 @@ export function WorkspaceMenuDialog({
           icon="Pencil"
           theme={theme}
           onPress={() => {
-            setDraft(workspace.customTitle ?? workspace.title);
+            const name = workspace.customTitle ?? workspace.title;
+            draftName.current = name;
+            setInitialName(name);
             setStep("rename");
           }}
         />

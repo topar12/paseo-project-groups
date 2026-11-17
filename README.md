@@ -25,7 +25,7 @@ Installing does not change the sidebar. Open **Settings → Sidebar** and set **
 - Give groups and projects a color and an icon or emoji. Workspaces get a color.
 - Use the ⋯ menus to move, rename, pin, archive or remove things.
 - Change text size, row height, space between groups and indentation per device.
-- Read the plugin in English or Korean.
+- Read the plugin in English, Korean or Simplified Chinese.
 
 On a phone, long-press a row before dragging.
 

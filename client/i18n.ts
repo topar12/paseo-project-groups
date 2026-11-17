@@ -27,7 +27,7 @@ function lookup(resource: Tree, path: string): string | undefined {
   return typeof node === "string" ? node : undefined;
 }
 
-/** Korean has no singular form; English uses `_one` for exactly one. */
+/** English uses `_one` for exactly one; Korean and Chinese always use `_other`. */
 function pluralSuffix(language: Language, count: number): "one" | "other" {
   return language === "en" && count === 1 ? "one" : "other";
 }
@@ -51,13 +51,15 @@ export function translator(language: Language): Translate {
   };
 }
 
-/** The language chosen in the plugin settings, else the app language when it is Korean. */
+/** The language chosen in the plugin settings, else a supported app language. */
 export function useLanguage(): Language {
   const { locale } = useTranslation(messages);
   const appearance = useSettings(appearanceDocument);
   const choice = appearance.status === "ready" ? appearance.values.language : "auto";
   if (choice !== "auto") return choice;
-  return locale.toLowerCase().startsWith("ko") ? "ko" : "en";
+  const appLanguage = locale.toLowerCase();
+  if (appLanguage.startsWith("zh")) return "zh-CN";
+  return appLanguage.startsWith("ko") ? "ko" : "en";
 }
 
 export function useT(): Translate {

@@ -38,7 +38,7 @@ The sliders button next to New group opens the plugin's settings. You can change
 - how far projects and workspaces are indented
 - whether group names are bold
 - which details show: folder icons, status dots, changed-line counts, the Pinned section
-- the language: same as the app, English or Korean
+- the language: same as the app, English, Korean or Simplified Chinese
 
 Settings are saved per device, so your phone and your computer can look different.
 

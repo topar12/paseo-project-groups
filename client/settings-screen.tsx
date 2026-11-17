@@ -22,8 +22,8 @@ import { useT } from "./i18n";
 import { DEFAULT_APPEARANCE, lookFrom } from "./look";
 import { rowStyles, StatusDot } from "./rows";
 
-/** Each language is named in its own language so it can be found from either one. */
-const LANGUAGE_NAMES = { en: "English", ko: "한국어" } as const;
+/** Each language is named in its own language so it can be found in any locale. */
+const LANGUAGE_NAMES = { en: "English", ko: "한국어", "zh-CN": "简体中文" } as const;
 
 /** A sample of the sidebar drawn with the chosen values. */
 function Preview({ values, theme }: { values: AppearanceValues; theme: PluginSurfaceProps["theme"] }) {
