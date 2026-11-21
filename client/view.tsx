@@ -36,7 +36,8 @@ import { DeleteGroupDialog, ProjectMenuDialog, RemoveProjectDialog, WorkspaceMen
 import { DragProvider, useDragController } from "./drag";
 import type { Hit } from "./hit";
 import { useT } from "./i18n";
-import { DEFAULT_APPEARANCE, LookContext, lookFrom, useLook, useViewActions } from "./look";
+import { DisplayMenuButton } from "./display-menu";
+import { DEFAULT_APPEARANCE, LookContext, lookFrom, useLook } from "./look";
 import { ProjectIcon } from "./project-icon";
 import {
   addGroup,
@@ -234,8 +235,6 @@ function StatusMessage({
 
 function ToolbarRow({ view, onCreateGroup }: { view: PluginSidebarViewProps; onCreateGroup: () => void }) {
   const t = useT();
-  const look = useLook();
-  const actions = useViewActions();
   return (
     <View
       style={{
@@ -250,15 +249,7 @@ function ToolbarRow({ view, onCreateGroup }: { view: PluginSidebarViewProps; onC
       <View style={{ flex: 1 }}>
         <TextButton icon="FolderPlus" label={t("sidebar.newGroup")} view={view} onPress={onCreateGroup} />
       </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={t("sidebar.appearance")}
-        hitSlop={4}
-        onPress={actions.openAppearanceSettings}
-        style={{ padding: 6, marginRight: 6, borderRadius: 6 }}
-      >
-        <Icon name="SlidersHorizontal" size={look.icon} color={view.theme.colors.foregroundMuted} />
-      </Pressable>
+      <DisplayMenuButton view={view} />
     </View>
   );
 }
