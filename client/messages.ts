@@ -23,6 +23,8 @@ const en = {
   sidebar: {
     newGroup: "New group",
     appearance: "Sidebar appearance",
+    collapseAll: "Collapse all",
+    expandAll: "Expand all",
     pinned: "Pinned",
     ungrouped: "Ungrouped",
     emptyHint: "Create a group with “New group” above, then drag projects into it.",
@@ -236,6 +238,8 @@ const ko = {
   sidebar: {
     newGroup: "새 그룹",
     appearance: "사이드바 보기 설정",
+    collapseAll: "모두 접기",
+    expandAll: "모두 펼치기",
     pinned: "고정됨",
     ungrouped: "그룹 없음",
     emptyHint: "위 ‘새 그룹’을 눌러 그룹을 만든 뒤, 프로젝트를 그룹으로 끌어 놓으세요.",
@@ -437,6 +441,8 @@ const zhCN = {
   sidebar: {
     newGroup: "新建分组",
     appearance: "侧栏外观",
+    collapseAll: "全部收起",
+    expandAll: "全部展开",
     pinned: "已置顶",
     ungrouped: "未分组",
     emptyHint: "点击上方“新建分组”，再拖入项目。",

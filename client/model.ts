@@ -42,6 +42,16 @@ export function compactTimeAgo(iso: string, now: number = Date.now()): string {
   return new Date(time).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/**
+ * The fold list after Collapse all / Expand all: everything open once every key is folded, else
+ * every key folded. Keys of projects not shown right now stay as they were when folding.
+ */
+export function foldAllKeys(collapsed: readonly string[], keys: readonly string[]): string[] {
+  const folded = new Set(collapsed);
+  if (keys.every((key) => folded.has(key))) return [];
+  return [...new Set([...collapsed, ...keys])];
+}
+
 /** The app's route for a project's settings page. */
 export function projectSettingsPath(project: { hostId: string; id: string }): string {
   return `/settings/hosts/${encodeURIComponent(project.hostId)}/projects/${encodeURIComponent(project.id)}`;

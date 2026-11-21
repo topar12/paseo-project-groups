@@ -42,6 +42,7 @@ import {
   addGroup,
   canNest,
   dropProjects,
+  foldAllKeys,
   groupOfProject,
   moveGroup,
   nestProject,
@@ -232,7 +233,17 @@ function StatusMessage({
   );
 }
 
-function ToolbarRow({ view, onCreateGroup }: { view: PluginSidebarViewProps; onCreateGroup: () => void }) {
+function ToolbarRow({
+  view,
+  allFolded,
+  onCreateGroup,
+  onFoldAll,
+}: {
+  view: PluginSidebarViewProps;
+  allFolded: boolean;
+  onCreateGroup: () => void;
+  onFoldAll: () => void;
+}) {
   const t = useT();
   const look = useLook();
   const actions = useViewActions();
@@ -250,6 +261,19 @@ function ToolbarRow({ view, onCreateGroup }: { view: PluginSidebarViewProps; onC
       <View style={{ flex: 1 }}>
         <TextButton icon="FolderPlus" label={t("sidebar.newGroup")} view={view} onPress={onCreateGroup} />
       </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={allFolded ? t("sidebar.expandAll") : t("sidebar.collapseAll")}
+        hitSlop={4}
+        onPress={onFoldAll}
+        style={{ padding: 6, borderRadius: 6 }}
+      >
+        <Icon
+          name={allFolded ? "ChevronsUpDown" : "ChevronsDownUp"}
+          size={look.icon}
+          color={view.theme.colors.foregroundMuted}
+        />
+      </Pressable>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={t("sidebar.appearance")}
@@ -484,6 +508,24 @@ function GroupsList(view: PluginSidebarViewProps) {
     },
     [collapsed, collapsedList, layoutSaver, layoutState.status],
   );
+  /** Every group, Ungrouped section, project and sub-project. */
+  const foldKeys = useMemo(
+    () => [
+      ...groups.map((group) => `g:${group.id}`),
+      ...ungroupedSections.map((section) => section.foldKey),
+      ...order.map((key) => `p:${key}`),
+    ],
+    [groups, order, ungroupedSections],
+  );
+  const allFolded = foldKeys.every((key) => collapsed.has(key));
+  const foldAll = useCallback(() => {
+    if (layoutState.status !== "ready") return;
+    const next = foldAllKeys(collapsedList, foldKeys);
+    setPendingCollapsed(next);
+    void layoutSaver.save({ collapsed: next }).then((saved) => {
+      if (!saved) setPendingCollapsed(null);
+    });
+  }, [collapsedList, foldKeys, layoutSaver, layoutState.status]);
   const toggleGroup = useCallback((id: string) => toggle(`g:${id}`), [toggle]);
   const toggleProject = useCallback((key: string) => toggle(`p:${key}`), [toggle]);
 
@@ -765,7 +807,7 @@ function GroupsList(view: PluginSidebarViewProps) {
     <DecorationsContext.Provider value={decorations}>
       <DragProvider value={drag.controller}>
         <View style={{ flex: 1 }}>
-          <ToolbarRow view={view} onCreateGroup={createGroup} />
+          <ToolbarRow view={view} allFolded={allFolded} onCreateGroup={createGroup} onFoldAll={foldAll} />
           <View ref={viewportRef} {...drag.surfaceHandlers} style={{ flex: 1 }}>
             <ScrollView
               ref={scrollRef}
