@@ -15,6 +15,8 @@ export interface RailSegment {
   readonly parent: number;
   readonly children: readonly RailChildPoint[];
   readonly lane: number;
+  readonly top: number;
+  readonly bottom: number;
 }
 
 export interface RailLayout {
@@ -34,16 +36,63 @@ interface MeasurableNode {
   focus?: (options?: { preventScroll?: boolean }) => void;
 }
 
-const RAIL_BASE_X = 6;
-const LANE_STEP = 5;
-const MAX_LANES = 3;
-const RAIL_STROKE = 1.5;
-const RAIL_ELBOW_BASE_END = 17;
-const RAIL_RADIUS = 5;
+/**
+ * Refined metro-map rail geometry.
+ * - `RAIL_BASE_X = 6`, `LANE_STEP = 8`, `RAIL_RADIUS = 4` (2x pitch-to-radius ratio leaves 4px
+ *   of straight horizontal run between an outer curve and the adjacent lane).
+ * - `gutterExtra = laneCount * LANE_STEP` puts every vertical lane and opaque `surface0` crossing
+ *   bridge strictly inside the pure `surface0` left gutter before the row capsule (`gutterExtra + 4`).
+ * - `elbowEndX = gutterExtra + RAIL_ELBOW_INSET` (`armEnd = gutterExtra + 16`) keeps the parent
+ *   halo right edge (`gutterExtra + 20.75`) safely clear of both `pinned` (`gutterExtra + 22`)
+ *   and `narrow` (`gutterExtra + 30`) workspace rows.
+ */
+export const RAIL_BASE_X = 6;
+export const LANE_STEP = 8;
+export const MAX_LANES = 3;
+export const RAIL_RADIUS = 4;
+export const RAIL_ELBOW_INSET = 17;
+
 const LANE_GAP = 6;
 const EPSILON = 0.5;
 const SCROLL_MARGIN = 8;
+const CROSSING_HALO_PAD = 2;
 const EMPTY_LAYOUT: RailLayout = { rails: [], laneCount: 0 };
+
+/**
+ * Mid-tone family palette readable on both light and dark sidebars, intentionally avoiding
+ * alert red (`#E5484D`) so relationship rails are never mistaken for error indicators.
+ */
+export const FAMILY_PALETTE = [
+  "#0090FF", // blue
+  "#12A594", // teal
+  "#8E4EC6", // purple
+  "#D6A100", // amber
+  "#30A46C", // green
+  "#3E63DD", // indigo
+  "#D6409F", // rose
+  "#E07A2F", // copper
+] as const;
+
+/** Deterministic family accent color derived from the parent agent key. */
+export function familyColor(parentKey: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < parentKey.length; index++) {
+    hash ^= parentKey.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return FAMILY_PALETTE[(hash >>> 0) % FAMILY_PALETTE.length];
+}
+
+/** Convert `#RRGGBB` to `rgba(r, g, b, alpha)` so translucent strokes never dilute opaque halos. */
+export function withAlpha(hex: string, alpha: number): string {
+  const clean = hex.startsWith("#") ? hex.slice(1) : hex;
+  if (clean.length !== 6) return hex;
+  const r = Number.parseInt(clean.slice(0, 2), 16);
+  const g = Number.parseInt(clean.slice(2, 4), 16);
+  const b = Number.parseInt(clean.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return hex;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 type FrameHandle = { kind: "raf"; id: number } | { kind: "timer"; id: ReturnType<typeof setTimeout> };
 
@@ -116,36 +165,74 @@ async function measureRelative(node: MeasurableNode, container: MeasurableNode):
   return null;
 }
 
-/** Assign non-overlapping vertical lanes (capped at MAX_LANES to protect narrow mobile widths). */
-function assignLanes(
-  candidates: readonly { parentKey: string; parent: number; children: readonly RailChildPoint[]; top: number; bottom: number }[],
+type Span = { top: number; bottom: number };
+
+function overlapsSpan(a: Span, b: Span): boolean {
+  return !(a.bottom + LANE_GAP < b.top || a.top > b.bottom + LANE_GAP);
+}
+
+function overlapAmount(a: Span, b: Span): number {
+  const start = Math.max(a.top, b.top);
+  const end = Math.min(a.bottom, b.bottom);
+  return Math.max(0, end - start + LANE_GAP);
+}
+
+/**
+ * Assign vertical lanes (capped at MAX_LANES to protect narrow mobile widths).
+ * Places longer/enclosing spans on outer (smaller/left) lanes and shorter/nested spans on inner
+ * (larger/right) lanes while reusing lanes whenever vertical intervals do not conflict, which
+ * eliminates crossings for nested families and minimizes unavoidable bridge crossings.
+ */
+export function assignLanes(
+  candidates: readonly {
+    parentKey: string;
+    parent: number;
+    children: readonly RailChildPoint[];
+    top: number;
+    bottom: number;
+  }[],
 ): RailLayout {
   if (!candidates.length) return EMPTY_LAYOUT;
   const sorted = [...candidates].sort(
-    (a, b) => a.top - b.top || (a.bottom - a.top) - (b.bottom - b.top) || a.parentKey.localeCompare(b.parentKey),
+    (a, b) =>
+      (b.bottom - b.top) - (a.bottom - a.top) ||
+      a.top - b.top ||
+      a.parentKey.localeCompare(b.parentKey),
   );
-  const laneBottoms: number[] = [];
+  const laneSpans: Span[][] = [];
   const rails: RailSegment[] = [];
   for (const item of sorted) {
-    let lane = laneBottoms.findIndex((end) => end + LANE_GAP < item.top);
+    const span: Span = { top: item.top, bottom: item.bottom };
+    let lane = laneSpans.findIndex((existing) => existing.every((other) => !overlapsSpan(span, other)));
     if (lane === -1) {
-      if (laneBottoms.length < MAX_LANES) {
-        lane = laneBottoms.length;
-        laneBottoms.push(item.bottom);
+      if (laneSpans.length < MAX_LANES) {
+        lane = laneSpans.length;
+        laneSpans.push([span]);
       } else {
-        // Reuse the lane whose span finished earliest.
         lane = 0;
-        for (let index = 1; index < laneBottoms.length; index++) {
-          if (laneBottoms[index] < laneBottoms[lane]) lane = index;
+        let bestOverlap = Infinity;
+        for (let index = 0; index < laneSpans.length; index++) {
+          const total = laneSpans[index].reduce((sum, other) => sum + overlapAmount(span, other), 0);
+          if (total < bestOverlap) {
+            bestOverlap = total;
+            lane = index;
+          }
         }
-        laneBottoms[lane] = Math.max(laneBottoms[lane], item.bottom);
+        laneSpans[lane].push(span);
       }
     } else {
-      laneBottoms[lane] = item.bottom;
+      laneSpans[lane].push(span);
     }
-    rails.push({ parentKey: item.parentKey, parent: item.parent, children: item.children, lane });
+    rails.push({
+      parentKey: item.parentKey,
+      parent: item.parent,
+      children: item.children,
+      lane,
+      top: item.top,
+      bottom: item.bottom,
+    });
   }
-  return { rails, laneCount: laneBottoms.length };
+  return { rails, laneCount: laneSpans.length };
 }
 
 function sameLayout(left: RailLayout, right: RailLayout): boolean {
@@ -339,7 +426,7 @@ export function useRelationshipRail(
     viewportHeightRef.current = height;
   }, []);
 
-  const gutterExtra = layout.laneCount > 1 ? (layout.laneCount - 1) * LANE_STEP : 0;
+  const gutterExtra = layout.laneCount > 0 ? layout.laneCount * LANE_STEP : 0;
 
   return {
     register,
@@ -353,34 +440,149 @@ export function useRelationshipRail(
   };
 }
 
+type RailTone = "default" | "active" | "dimmed";
+
+function railStyleTokens(baseHex: string, tone: RailTone) {
+  if (tone === "active") {
+    return {
+      stroke: 2,
+      lineColor: baseHex,
+      parentDotColor: baseHex,
+      parentHaloColor: withAlpha(baseHex, 0.22),
+      parentDotSize: 6.5,
+      parentHaloSize: 9.5,
+      childDotColor: baseHex,
+      childDotSize: 4.5,
+    };
+  }
+  if (tone === "dimmed") {
+    return {
+      stroke: 1.25,
+      lineColor: withAlpha(baseHex, 0.28),
+      parentDotColor: withAlpha(baseHex, 0.36),
+      parentHaloColor: withAlpha(baseHex, 0.1),
+      parentDotSize: 5.5,
+      parentHaloSize: 8.5,
+      childDotColor: withAlpha(baseHex, 0.34),
+      childDotSize: 3.5,
+    };
+  }
+  return {
+    stroke: 1.5,
+    lineColor: withAlpha(baseHex, 0.62),
+    parentDotColor: withAlpha(baseHex, 0.85),
+    parentHaloColor: withAlpha(baseHex, 0.16),
+    parentDotSize: 6,
+    parentHaloSize: 9,
+    childDotColor: withAlpha(baseHex, 0.78),
+    childDotSize: 4,
+  };
+}
+
 function RailItem({
   rail,
-  active,
+  allRails,
+  tone,
+  activeParentKey,
   elbowEndX,
   theme,
 }: {
   rail: RailSegment;
-  active: boolean;
+  allRails: readonly RailSegment[];
+  tone: RailTone;
+  activeParentKey: string | null;
   elbowEndX: number;
   theme: PluginSidebarViewProps["theme"];
 }) {
   const x = RAIL_BASE_X + rail.lane * LANE_STEP;
-  const elbowWidth = Math.max(8, elbowEndX - x);
-  const { parent, children } = rail;
-  const childYs = children.map((child) => child.y);
-  const top = Math.min(parent, ...childYs);
-  const bottom = Math.max(parent, ...childYs);
-  const topIsChild = top < parent;
-  const bottomIsChild = bottom > parent;
-  const trunkTop = topIsChild ? Math.min(parent, top + RAIL_RADIUS) : top;
-  const trunkBottom = bottomIsChild ? Math.max(parent, bottom - RAIL_RADIUS) : bottom;
+  const armEnd = elbowEndX - 1;
+  const baseHex = familyColor(rail.parentKey);
+  const {
+    stroke,
+    lineColor,
+    parentDotColor,
+    parentHaloColor,
+    parentDotSize,
+    parentHaloSize,
+    childDotColor,
+    childDotSize,
+  } = railStyleTokens(baseHex, tone);
+  const surface = theme.colors.surface0;
+  const { parent, children, top, bottom } = rail;
+  const span = bottom - top;
+  const radius = Math.min(RAIL_RADIUS, Math.max(0, span / 2));
+
+  // All arms (parent guide arm + child branch arms) share identical seam-free geometry.
+  const arms: { key: string; y: number; kind: "parent" | "child" }[] = [
+    { key: `parent:${rail.parentKey}`, y: parent, kind: "parent" },
+    ...children.map((child) => ({ key: `child:${child.key}`, y: child.y, kind: "child" as const })),
+  ];
+
+  // Vertical trunk strictly spans between the top and bottom corner curves with 0px overlap.
+  const trunkTop = top + radius;
+  const trunkBottom = bottom - radius;
   const trunkHeight = Math.max(0, trunkBottom - trunkTop);
-  const color = active ? theme.colors.accent : theme.colors.foregroundMuted;
-  const lineOpacity = active ? 1 : 0.42;
-  const ringSize = 7;
+
+  // Horizontal bridge halos: only for strict interior crossings so 3-level chains (A -> B -> C)
+  // sharing a relay row never erase the other family's endpoint corner on B.
+  const horizontalCrossings: { key: string; x: number; y: number; width: number; height: number }[] = [];
+  for (const arm of arms) {
+    for (const other of allRails) {
+      if (other.parentKey === rail.parentKey || other.lane <= rail.lane) continue;
+      // If the crossed inner rail is the active highlighted rail, let the active rail ride on top.
+      if (activeParentKey && other.parentKey === activeParentKey) continue;
+      if (arm.y > other.top + EPSILON && arm.y < other.bottom - EPSILON) {
+        const otherX = RAIL_BASE_X + other.lane * LANE_STEP;
+        const otherStroke = activeParentKey ? 1.25 : 1.5;
+        horizontalCrossings.push({
+          key: `hbridge:${arm.key}:${other.parentKey}`,
+          x: otherX - CROSSING_HALO_PAD,
+          y: arm.y - stroke / 2 - CROSSING_HALO_PAD,
+          width: otherStroke + CROSSING_HALO_PAD * 2,
+          height: stroke + CROSSING_HALO_PAD * 2,
+        });
+      }
+    }
+  }
+
+  // Vertical bridge halos: when THIS rail is active on an inner lane and its vertical trunk
+  // strictly crosses a dimmed outer rail's horizontal arm, paint a crisp `surface0` vertical gap.
+  const verticalCrossings: { key: string; x: number; y: number; width: number; height: number }[] = [];
+  if (tone === "active") {
+    for (const other of allRails) {
+      if (other.parentKey === rail.parentKey || other.lane >= rail.lane) continue;
+      const otherArmYs = [other.parent, ...other.children.map((child) => child.y)];
+      for (const armY of otherArmYs) {
+        if (armY > top + EPSILON && armY < bottom - EPSILON) {
+          verticalCrossings.push({
+            key: `vbridge:${other.parentKey}:${armY}`,
+            x: x - CROSSING_HALO_PAD,
+            y: armY - 1.25 / 2 - CROSSING_HALO_PAD,
+            width: stroke + CROSSING_HALO_PAD * 2,
+            height: 1.25 + CROSSING_HALO_PAD * 2,
+          });
+        }
+      }
+    }
+  }
 
   return (
     <>
+      {verticalCrossings.map((bridge) => (
+        <View
+          key={bridge.key}
+          testID="rail-bridge-halo"
+          style={{
+            position: "absolute",
+            left: bridge.x,
+            top: bridge.y,
+            width: bridge.width,
+            height: bridge.height,
+            backgroundColor: surface,
+          }}
+        />
+      ))}
+
       {trunkHeight > 0 ? (
         <View
           style={{
@@ -388,74 +590,134 @@ function RailItem({
             left: x,
             top: trunkTop,
             height: trunkHeight,
-            width: RAIL_STROKE,
-            backgroundColor: color,
-            opacity: lineOpacity,
+            width: stroke,
+            backgroundColor: lineColor,
           }}
         />
       ) : null}
-      {children.map((child) => {
-        const below = child.y >= parent;
-        const elbowHeight = RAIL_RADIUS + RAIL_STROKE;
-        return below ? (
+
+      {horizontalCrossings.map((bridge) => (
+        <View
+          key={bridge.key}
+          testID="rail-bridge-halo"
+          style={{
+            position: "absolute",
+            left: bridge.x,
+            top: bridge.y,
+            width: bridge.width,
+            height: bridge.height,
+            backgroundColor: surface,
+          }}
+        />
+      ))}
+
+      {arms.map((arm) => {
+        // Both parent and child arms stop flush at the left rim of their solid dots so translucent
+        // colors never double-stack and soft halos stay clean on selected/highlighted rows.
+        const stopX = arm.kind === "child" ? armEnd - childDotSize / 2 : armEnd - parentDotSize / 2;
+        const isTop = span > EPSILON && Math.abs(arm.y - top) < EPSILON;
+        const isBottom = span > EPSILON && Math.abs(arm.y - bottom) < EPSILON;
+
+        if (isTop) {
+          return (
+            <View
+              key={arm.key}
+              style={{
+                position: "absolute",
+                left: x,
+                top: arm.y - stroke / 2,
+                width: Math.max(radius + stroke, stopX - x),
+                height: radius + stroke / 2,
+                borderLeftWidth: stroke,
+                borderTopWidth: stroke,
+                borderRightWidth: 0,
+                borderBottomWidth: 0,
+                borderTopLeftRadius: radius,
+                borderColor: lineColor,
+              }}
+            />
+          );
+        }
+
+        if (isBottom) {
+          return (
+            <View
+              key={arm.key}
+              style={{
+                position: "absolute",
+                left: x,
+                top: arm.y - radius,
+                width: Math.max(radius + stroke, stopX - x),
+                height: radius + stroke / 2,
+                borderLeftWidth: stroke,
+                borderBottomWidth: stroke,
+                borderRightWidth: 0,
+                borderTopWidth: 0,
+                borderBottomLeftRadius: radius,
+                borderColor: lineColor,
+              }}
+            />
+          );
+        }
+
+        const startX = span > EPSILON ? x + stroke : x;
+        return (
           <View
-            key={child.key}
+            key={arm.key}
             style={{
               position: "absolute",
-              left: x,
-              top: child.y - elbowHeight + RAIL_STROKE / 2,
-              width: elbowWidth,
-              height: elbowHeight,
-              borderLeftWidth: RAIL_STROKE,
-              borderBottomWidth: RAIL_STROKE,
-              borderBottomLeftRadius: RAIL_RADIUS,
-              borderColor: color,
-              opacity: lineOpacity,
-            }}
-          />
-        ) : (
-          <View
-            key={child.key}
-            style={{
-              position: "absolute",
-              left: x,
-              top: child.y - RAIL_STROKE / 2,
-              width: elbowWidth,
-              height: elbowHeight,
-              borderLeftWidth: RAIL_STROKE,
-              borderTopWidth: RAIL_STROKE,
-              borderTopLeftRadius: RAIL_RADIUS,
-              borderColor: color,
-              opacity: lineOpacity,
+              left: startX,
+              top: arm.y - stroke / 2,
+              width: Math.max(0, stopX - startX),
+              height: stroke,
+              backgroundColor: lineColor,
             }}
           />
         );
       })}
-      {/* Opaque backdrop hides the trunk inside the hollow parent ring without tinting the ring border. */}
+
+      {/* Parent origin node: soft translucent family-color glow ring around a solid core dot. */}
       <View
+        testID="rail-parent-halo"
         style={{
           position: "absolute",
-          left: x - (ringSize - RAIL_STROKE) / 2,
-          top: parent - ringSize / 2,
-          width: ringSize,
-          height: ringSize,
-          borderRadius: ringSize / 2,
-          backgroundColor: theme.colors.surface0,
+          left: armEnd - parentHaloSize / 2,
+          top: parent - parentHaloSize / 2,
+          width: parentHaloSize,
+          height: parentHaloSize,
+          borderRadius: parentHaloSize / 2,
+          backgroundColor: parentHaloColor,
         }}
       />
       <View
+        testID="rail-parent-node"
         style={{
           position: "absolute",
-          left: x - (ringSize - RAIL_STROKE) / 2,
-          top: parent - ringSize / 2,
-          width: ringSize,
-          height: ringSize,
-          borderWidth: RAIL_STROKE,
-          borderRadius: ringSize / 2,
-          borderColor: color,
-          opacity: lineOpacity,
+          left: armEnd - parentDotSize / 2,
+          top: parent - parentDotSize / 2,
+          width: parentDotSize,
+          height: parentDotSize,
+          borderRadius: parentDotSize / 2,
+          backgroundColor: parentDotColor,
         }}
       />
+
+      {/* Child terminal dots: smaller solid dots finishing each child arm cleanly. */}
+      {children.map((child) => (
+        <View
+          key={`dot:${child.key}`}
+          testID="rail-child-node"
+          style={{
+            position: "absolute",
+            left: armEnd - childDotSize / 2,
+            top: child.y - childDotSize / 2,
+            width: childDotSize,
+            height: childDotSize,
+            borderRadius: childDotSize / 2,
+            backgroundColor: childDotColor,
+          }}
+        />
+      ))}
     </>
   );
 }
@@ -472,32 +734,38 @@ export function RelationshipRail({
   theme: PluginSidebarViewProps["theme"];
 }) {
   if (!rails.length) return null;
-  const extra = laneCount > 1 ? (laneCount - 1) * LANE_STEP : 0;
-  const elbowEndX = RAIL_ELBOW_BASE_END + extra;
-  // Draw muted rails first and the active/hovered accent rail on top.
-  const ordered = activeParentKey
-    ? [
-        ...rails.filter((item) => item.parentKey !== activeParentKey),
-        ...rails.filter((item) => item.parentKey === activeParentKey),
-      ]
-    : rails;
+  const extra = laneCount * LANE_STEP;
+  const elbowEndX = extra + RAIL_ELBOW_INSET;
+  // Draw inner (larger lane) non-active rails first so outer arms bridge cleanly over inner trunks,
+  // and always draw the active/hovered family last on top.
+  const inactive = rails
+    .filter((item) => item.parentKey !== activeParentKey)
+    .sort((a, b) => b.lane - a.lane || a.parentKey.localeCompare(b.parentKey));
+  const active = activeParentKey ? rails.filter((item) => item.parentKey === activeParentKey) : [];
+  const ordered = [...inactive, ...active];
 
   return (
     <View
       pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: elbowEndX + 2 }}
+      style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: elbowEndX + 5 }}
     >
-      {ordered.map((rail) => (
-        <RailItem
-          key={rail.parentKey}
-          rail={rail}
-          active={rail.parentKey === activeParentKey}
-          elbowEndX={elbowEndX}
-          theme={theme}
-        />
-      ))}
+      {ordered.map((rail) => {
+        const tone: RailTone =
+          activeParentKey === null ? "default" : rail.parentKey === activeParentKey ? "active" : "dimmed";
+        return (
+          <RailItem
+            key={rail.parentKey}
+            rail={rail}
+            allRails={rails}
+            tone={tone}
+            activeParentKey={activeParentKey}
+            elbowEndX={elbowEndX}
+            theme={theme}
+          />
+        );
+      })}
     </View>
   );
 }

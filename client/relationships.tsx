@@ -11,6 +11,7 @@ import { Pressable, Text, View } from "react-native";
 import { useT } from "./i18n";
 import { useLook } from "./look";
 import { relationshipRows, type AgentRelationships } from "./relationship-model";
+import { familyColor, withAlpha } from "./relationship-rail";
 import { StatusDot, WorkspaceRow, useRowStyles } from "./rows";
 import { sidebarNavProps } from "./web";
 
@@ -32,11 +33,22 @@ function isAgentSelected(sidebar: RelationshipActions, agent: AgentRef, singleWo
   return !!singleWorkspace && sidebar.view.active.workspace?.key === singleWorkspace.key;
 }
 
-/** Quiet, non-expanding badge on parent rows showing how many cross-workspace children exist. */
-function ChildBadge({ count, theme }: { count: number; theme: PluginSidebarViewProps["theme"] }) {
+/** Quiet, non-expanding badge on parent rows echoing the family rail color. */
+function ChildBadge({
+  count,
+  familyHex,
+  highlighted,
+  theme,
+}: {
+  count: number;
+  familyHex: string;
+  highlighted: boolean;
+  theme: PluginSidebarViewProps["theme"];
+}) {
   const t = useT();
   const look = useLook();
   const styles = useRowStyles(theme);
+  const iconColor = highlighted ? familyHex : withAlpha(familyHex, 0.85);
   return (
     <View
       pointerEvents="none"
@@ -52,11 +64,12 @@ function ChildBadge({ count, theme }: { count: number; theme: PluginSidebarViewP
         paddingVertical: 1,
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: theme.colors.border,
+        borderColor: highlighted ? withAlpha(familyHex, 0.55) : withAlpha(familyHex, 0.3),
+        backgroundColor: highlighted ? withAlpha(familyHex, 0.12) : undefined,
       }}
     >
-      <Icon name="GitFork" size={Math.max(9, look.small - 1)} color={theme.colors.foregroundMuted} />
-      <Text selectable={false} numberOfLines={1} style={styles.detail}>
+      <Icon name="GitFork" size={Math.max(9, look.small - 1)} color={iconColor} />
+      <Text selectable={false} numberOfLines={1} style={[styles.detail, highlighted ? { color: familyHex } : null]}>
         {t("relation.count", { count })}
       </Text>
     </View>
@@ -347,6 +360,7 @@ export function RelationshipWorkspace({
   const singleRoot = agents.length === 1;
   const agent = related.find((item) => view.active.agent?.key === item.key) ?? related[0];
   const count = model.children.get(agent.key)?.length ?? 0;
+  const highlighted = sidebar.highlighted.has(agent.key);
 
   return (
     <RelationAnchor agent={agent} sidebar={sidebar}>
@@ -357,10 +371,18 @@ export function RelationshipWorkspace({
         onMenu={onMenu}
         relation={{
           key: agent.key,
-          highlighted: sidebar.highlighted.has(agent.key),
+          highlighted,
           open: singleRoot ? () => sidebar.open(agent) : () => view.navigation.openWorkspace(reference),
           onHover: (hover) => sidebar.hover(hover ? agent.key : null),
-          trailing: count > 0 ? <ChildBadge count={count} theme={view.theme} /> : null,
+          trailing:
+            count > 0 ? (
+              <ChildBadge
+                count={count}
+                familyHex={familyColor(agent.key)}
+                highlighted={highlighted}
+                theme={view.theme}
+              />
+            ) : null,
         }}
       />
     </RelationAnchor>

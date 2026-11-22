@@ -755,8 +755,12 @@ test("By relation view displays clickable tree rows with full project names, no 
   assert.equal(harness.scrollCalls.length, 0, "clicking a tree row must not call scrollTo");
 });
 
-test("always-visible rail renders muted when unselected or on unrelated session, switches to accent on active family, and respects collapsed folds", async (t) => {
+test("always-visible rail uses deterministic family color, promotes active/hovered family, echoes ChildBadge color, and respects collapsed folds", async (t) => {
   const data = sampleCrossProjectData();
+  const railMod = createLoader({ "react-native": { Platform: { OS: "web" }, View: "View" } })("client/relationship-rail.tsx");
+  const expectedHex = railMod.familyColor(data.refs.aCli.key);
+  assert.notEqual(expectedHex, "#E5484D", "family palette must avoid alert red");
+
   // Select an unrelated workspace (paseo-project-groups) with no hover.
   const harness = makeHarness({
     projects: data.projects,
@@ -773,27 +777,44 @@ test("always-visible rail renders muted when unselected or on unrelated session,
     await new Promise((r) => setTimeout(r, 15));
   });
 
-  // Rail overlay is mounted even though an unrelated session is active!
+  // Rail overlay is mounted with calm default rgba family color (no container/view opacity < 1 stacking).
   const railOverlay = renderer.root.findByProps({ accessibilityElementsHidden: true, pointerEvents: "none" });
   const railViews = railOverlay.findAllByType("View");
   assert.ok(
-    railViews.some((v) => v.props.style?.backgroundColor === theme.colors.foregroundMuted && v.props.style?.opacity < 1),
-    "unrelated selection draws muted low-contrast rail",
+    railViews.some((v) => v.props.style?.backgroundColor === railMod.withAlpha(expectedHex, 0.62) && v.props.style?.width === 1.5),
+    "unrelated selection draws calm 1.5px rgba family rail",
   );
   assert.equal(
-    railViews.some((v) => v.props.style?.backgroundColor === theme.colors.accent),
+    railViews.some((v) => typeof v.props.style?.opacity === "number" && v.props.style.opacity < 1),
     false,
-    "unrelated selection does not highlight rail with accent",
+    "rail views must use rgba colors instead of view opacity < 1 to prevent dark joint overlap dots",
   );
+  // Parent origin node (soft family-color translucent halo + solid dot) and child terminal dots both render.
+  const parentHalo = railOverlay.findByProps({ testID: "rail-parent-halo" });
+  const parentNode = railOverlay.findByProps({ testID: "rail-parent-node" });
+  const childNodes = railOverlay.findAllByProps({ testID: "rail-child-node" });
+  assert.equal(parentHalo.props.style.backgroundColor, railMod.withAlpha(expectedHex, 0.16));
+  assert.notEqual(parentHalo.props.style.backgroundColor, theme.colors.surface0, "parent halo must not punch a surface0 hole on selected/highlighted rows");
+  assert.equal(childNodes.length, 2);
+  assert.ok(parentNode.props.style.width > childNodes[0].props.style.width, "parent node is more prominent than child dots");
 
-  // Hovering a member of the MOM family promotes its rail to accent without scrolling or unfolding.
+  // Right-side ChildBadge echoes the same family color.
+  const badge = renderer.root.findByProps({ accessibilityLabel: "2 个子 Agent", accessibilityRole: "text" });
+  const forkIcon = badge.findByType("Icon");
+  assert.equal(forkIcon.props.color, railMod.withAlpha(expectedHex, 0.85));
+
+  // Hovering a member of the MOM family promotes its rail to solid 2px family color and brightens ChildBadge.
   const parentRow = renderer.root.findByProps({ accessibilityLabel: "打开MOM CLI", accessibilityRole: "button" });
   act(() => parentRow.props.onHoverIn());
-  const hoveredViews = renderer.root.findByProps({ accessibilityElementsHidden: true, pointerEvents: "none" }).findAllByType("View");
+  const hoveredOverlay = renderer.root.findByProps({ accessibilityElementsHidden: true, pointerEvents: "none" });
+  const hoveredViews = hoveredOverlay.findAllByType("View");
   assert.ok(
-    hoveredViews.some((v) => v.props.style?.backgroundColor === theme.colors.accent && v.props.style?.opacity === 1),
-    "hovered family rail switches to accent",
+    hoveredViews.some((v) => v.props.style?.backgroundColor === expectedHex && v.props.style?.width === 2),
+    "hovered family rail switches to solid 2px family color",
   );
+  const hoveredBadge = renderer.root.findByProps({ accessibilityLabel: "2 个子 Agent", accessibilityRole: "text" });
+  assert.equal(hoveredBadge.findByType("Icon").props.color, expectedHex);
+  assert.equal(hoveredBadge.props.style.backgroundColor, railMod.withAlpha(expectedHex, 0.12));
   assert.equal(harness.scrollCalls.length, 0);
   assert.equal(harness.savedLayouts.length, 0);
 
@@ -820,11 +841,145 @@ test("always-visible rail renders muted when unselected or on unrelated session,
   assert.equal(collapsedHarness.savedLayouts.length, 0);
 });
 
+test("rail geometry keeps lanes/bridges in pure surface0 gutter outside row capsules, clears pinned/narrow rows, uses non-surface0 parent halo, and protects 3-level relay corners", async (t) => {
+  const load = createLoader({
+    "react-native": { Platform: { OS: "web" }, View: "View" },
+  });
+  const {
+    RAIL_BASE_X,
+    LANE_STEP,
+    RAIL_RADIUS,
+    RAIL_ELBOW_INSET,
+    MAX_LANES,
+    assignLanes,
+    familyColor,
+    withAlpha,
+    RelationshipRail,
+  } = load("client/relationship-rail.tsx");
+
+  // Geometry invariants across 1..MAX_LANES:
+  // 1) radius strictly smaller than lane pitch (2x ratio -> 4px straight segment)
+  // 2) every vertical lane and crossing bridge halo stays strictly left of the row highlight capsule (extra + 4)
+  // 3) parent halo right edge stays strictly left of both pinned (extra + 22) and narrow (extra + 30) workspaces
+  assert.ok(RAIL_RADIUS < LANE_STEP, `RAIL_RADIUS (${RAIL_RADIUS}) must be strictly smaller than LANE_STEP (${LANE_STEP})`);
+  assert.ok(LANE_STEP - RAIL_RADIUS >= 4, "sufficient straight horizontal run between curve and adjacent lane");
+  for (let lanes = 1; lanes <= MAX_LANES; lanes++) {
+    const extra = lanes * LANE_STEP;
+    const rowCapsuleLeft = extra + 4;
+    const innermostLaneX = RAIL_BASE_X + (lanes - 1) * LANE_STEP;
+    const maxBridgeRightEdge = innermostLaneX - 2 + (2 + 4); // stroke(2) + 2*pad(2)
+    assert.ok(
+      maxBridgeRightEdge <= rowCapsuleLeft,
+      `lane ${lanes - 1} bridge right edge (${maxBridgeRightEdge}) must stay outside row capsule (${rowCapsuleLeft})`,
+    );
+    const armEnd = extra + RAIL_ELBOW_INSET - 1;
+    const parentHaloRightEdge = armEnd + 9.5 / 2;
+    const pinnedStart = extra + 4 + 18;
+    const narrowStart = extra + 4 + 26;
+    assert.ok(parentHaloRightEdge < pinnedStart, `parent halo (${parentHaloRightEdge}) must clear pinned row (${pinnedStart})`);
+    assert.ok(parentHaloRightEdge < narrowStart, `parent halo (${parentHaloRightEdge}) must clear narrow row (${narrowStart})`);
+  }
+
+  // Outer-long / inner-short lane packing eliminates crossings for nested spans.
+  const nested = plain(assignLanes([
+    { parentKey: "short-inner", parent: 100, children: [{ key: "sc1", y: 180 }], top: 100, bottom: 180 },
+    { parentKey: "long-outer", parent: 20, children: [{ key: "lc1", y: 280 }], top: 20, bottom: 280 },
+  ]));
+  const longLane = nested.rails.find((r) => r.parentKey === "long-outer").lane;
+  const shortLane = nested.rails.find((r) => r.parentKey === "short-inner").lane;
+  assert.equal(longLane, 0, "enclosing long span takes outer lane 0");
+  assert.equal(shortLane, 1, "nested short span takes inner lane 1");
+
+  // 3-level chain (A -> B -> C) sharing relay row B (y=120): neither side emits a false crossing bridge on B!
+  const chainLayout = assignLanes([
+    { parentKey: "chain-a", parent: 20, children: [{ key: "chain-b", y: 120 }], top: 20, bottom: 120 },
+    { parentKey: "chain-b", parent: 120, children: [{ key: "chain-c", y: 220 }], top: 120, bottom: 220 },
+  ]);
+  assert.equal(chainLayout.laneCount, 2);
+  let chainRenderer;
+  act(() => {
+    chainRenderer = create(React.createElement(RelationshipRail, {
+      rails: chainLayout.rails,
+      laneCount: chainLayout.laneCount,
+      activeParentKey: "chain-b",
+      theme,
+    }));
+  });
+  t.after(() => act(() => chainRenderer.unmount()));
+  assert.equal(
+    chainRenderer.root.findAllByProps({ testID: "rail-bridge-halo" }).length,
+    0,
+    "3-level chain sharing relay row B must not emit crossing bridge halos at the shared endpoint",
+  );
+
+  // Partial overlap creates a real interior crossing: outer lane 0 arm at y=160 crosses inner lane 1 trunk [100..240].
+  const crossingLayout = assignLanes([
+    { parentKey: "fam-a", parent: 20, children: [{ key: "a1", y: 160 }], top: 20, bottom: 160 },
+    { parentKey: "fam-b", parent: 100, children: [{ key: "b1", y: 240 }], top: 100, bottom: 240 },
+  ]);
+  assert.equal(crossingLayout.laneCount, 2);
+
+  // Render with NO active family: outer arm emits an opaque `surface0` crossing bridge halo strictly outside row capsule.
+  let renderer;
+  act(() => {
+    renderer = create(React.createElement(RelationshipRail, {
+      rails: crossingLayout.rails,
+      laneCount: crossingLayout.laneCount,
+      activeParentKey: null,
+      theme,
+    }));
+  });
+  t.after(() => act(() => renderer.unmount()));
+
+  const bridges = renderer.root.findAllByProps({ testID: "rail-bridge-halo" });
+  assert.ok(bridges.length >= 1, "crossing arm renders opaque surface0 bridge halo over crossed vertical trunk");
+  const capsuleLeft = crossingLayout.laneCount * LANE_STEP + 4;
+  for (const bridge of bridges) {
+    assert.equal(bridge.props.style.backgroundColor, theme.colors.surface0);
+    assert.equal(bridge.props.style.opacity, undefined, "bridge halo must remain 100% opaque");
+    assert.ok(
+      bridge.props.style.left + bridge.props.style.width <= capsuleLeft,
+      "crossing bridge halo must stay strictly inside the pure surface0 left gutter",
+    );
+  }
+
+  // Render with inner family (`fam-b`) active: active family gets solid 2px on top, outer `fam-a` dims to 0.28 alpha & 1.25px.
+  act(() => {
+    renderer.update(React.createElement(RelationshipRail, {
+      rails: crossingLayout.rails,
+      laneCount: crossingLayout.laneCount,
+      activeParentKey: "fam-b",
+      theme,
+    }));
+  });
+  const allViews = renderer.root.findAllByType("View");
+  const colorA = familyColor("fam-a");
+  const colorB = familyColor("fam-b");
+  assert.ok(
+    allViews.some((v) => v.props.style?.backgroundColor === colorB && v.props.style?.width === 2),
+    "active family renders solid 2px trunk",
+  );
+  assert.ok(
+    allViews.some((v) => v.props.style?.backgroundColor === withAlpha(colorA, 0.28) && v.props.style?.width === 1.25),
+    "non-active family recedes to dimmed 0.28 alpha & 1.25px stroke",
+  );
+  assert.ok(
+    renderer.root.findAllByProps({ testID: "rail-bridge-halo" }).length >= 1,
+    "active inner trunk renders opaque vertical bridge halo over dimmed outer arm",
+  );
+  // Active family's parent halo uses soft family tint (0.22 alpha), never surface0, and renders last on top.
+  const parentHalos = renderer.root.findAllByProps({ testID: "rail-parent-halo" });
+  assert.equal(parentHalos.at(-1).props.style.backgroundColor, withAlpha(colorB, 0.22));
+  assert.equal(parentHalos[0].props.style.backgroundColor, withAlpha(colorA, 0.1));
+  const parentNodes = renderer.root.findAllByProps({ testID: "rail-parent-node" });
+  assert.equal(parentNodes.at(-1).props.style.backgroundColor, colorB, "active family renders last on top");
+});
+
 test("useRelationshipRail batches multiple families, assigns separate lanes for overlapping spans, keeps stability, and minimally scrolls", async (t) => {
   const load = createLoader({
     "react-native": { Platform: { OS: "web" }, View: "View" },
   });
-  const { useRelationshipRail, RelationshipRail } = load("client/relationship-rail.tsx");
+  const { useRelationshipRail, RelationshipRail, LANE_STEP } = load("client/relationship-rail.tsx");
 
   const p1 = ref("agent", "h1", "p1");
   const c1Above = ref("agent", "h1", "c1-above");
@@ -893,7 +1048,7 @@ test("useRelationshipRail batches multiple families, assigns separate lanes for 
 
   assert.equal(hookApi.rails.length, 2);
   assert.equal(hookApi.laneCount, 2, "overlapping families get separate vertical lanes");
-  assert.equal(hookApi.gutterExtra, 5);
+  assert.equal(hookApi.gutterExtra, 2 * LANE_STEP);
   assert.notEqual(hookApi.rails[0].lane, hookApi.rails[1].lane);
 
   // Stability check: repeated refreshes with identical layout produce ZERO extra renders.
@@ -906,14 +1061,14 @@ test("useRelationshipRail batches multiple families, assigns separate lanes for 
   });
   assert.equal(renders, settledRenders, "identical measurements must not trigger re-renders");
 
-  // Non-overlapping families share lane 0 with zero extra gutter width.
+  // Non-overlapping families share lane 0 with 1 dedicated lane gutter (keeps lane outside row capsules).
   await act(async () => {
     hookApi.register(p2.key, makeNode(240));
     hookApi.register(c2.key, makeNode(300));
     await new Promise((r) => setTimeout(r, 15));
   });
   assert.equal(hookApi.laneCount, 1, "non-overlapping families share a single lane");
-  assert.equal(hookApi.gutterExtra, 0);
+  assert.equal(hookApi.gutterExtra, LANE_STEP);
 
   // Already-visible target in viewport [0, 300]: focus with preventScroll, NO scrollTo!
   await act(async () => {
