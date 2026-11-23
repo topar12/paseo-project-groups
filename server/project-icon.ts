@@ -15,8 +15,10 @@ export interface IconDaemon {
   }>;
 }
 
-/** Calls the public PaseoApi lacks: label colors and read state. */
+/** Calls the public PaseoApi lacks: label colors, read state and project removal. */
 export interface LocalDaemon extends IconDaemon {
+  listProjects(): Promise<{ projects?: readonly { projectId?: unknown }[] }>;
+  removeProject(projectId: string): Promise<{ removedWorkspaceIds?: readonly string[] }>;
   listWorkspaceLabels(): Promise<{ labels: readonly { name: string; color: string }[] }>;
   clearWorkspaceAttention(workspaceId: string): Promise<void>;
   markWorkspaceUnread(workspaceId: string): Promise<void>;

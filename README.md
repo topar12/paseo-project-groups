@@ -2,6 +2,8 @@
 
 Sort Paseo sidebar projects into groups you can drag, fold and color.
 
+**Languages:** English, Korean (한국어), Simplified Chinese (简体中文)
+
 ![Project groups](assets/thumbnail.png)
 
 ## Install
@@ -27,6 +29,8 @@ Installing does not change the sidebar. Open **Settings → Sidebar** and set **
 - Give groups and projects a color and an icon (any Lucide icon, searchable by name) or emoji. Workspaces get a color.
 - Projects use their Paseo image unless you choose a plugin icon or emoji.
 - Folded projects and groups show the most urgent workspace status on their icon, and a light fill when they hold the workspace you have open.
+- See which agents started which: lines join a parent agent's workspace with its sub-agents' workspaces, and **By relation** shows all agents as a tree. Turn the lines off in the settings if you don't need them.
+- Move through the list with the keyboard in the desktop app and browser, including jumps to an agent's parent and siblings.
 - Use the ⋯ menus to move, rename, label, pin, archive or remove things, mark a workspace as read or unread, and open a project's settings.
 - Change text size, row height, space between groups and indentation per device, and how workspaces are sorted, titled and labeled, like in Paseo's own sidebar.
 - Read the plugin in English, Korean or Simplified Chinese.
@@ -39,7 +43,7 @@ Paseo 0.16 or later on both the daemon and the app, with plugins enabled. Sideba
 
 ## Data
 
-Groups, colors and icons are saved in the plugin's settings on the daemon, so every connected app sees the same groups. Appearance and folding are saved per device. Removing a project runs `paseo project delete` on the daemon's machine, since the plugin API has no call for it. When a sub-project's parent is missing from the list, the plugin asks that daemon (with `paseo daemon status` and `paseo project ls`) whether the parent still exists, and cleans up only when the daemon says it doesn't. Project icons, label colors and read state go through a local connection to that daemon; no external service is contacted.
+Groups, colors and icons are saved in the plugin's settings on the daemon, so every connected app sees the same groups. Appearance and folding are saved per device. Project icons, label colors and read state go through a local connection to that daemon, and no external service is contacted. Removing a project and checking whether a sub-project's parent still exists also use that connection, because the plugin API has no call for them, and a parent's nesting is cleaned up only when the daemon says the parent is gone. The plugin starts no other programs.
 
 Uninstalling the plugin deletes the saved groups. To get a new version, use `paseo plugin update project-groups` instead.
 

@@ -2,17 +2,18 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
 /**
- * Removes a project from Paseo through the CLI on the daemon host, because the plugin SDK has
- * no project removal call. Paseo archives the project's workspaces; files on disk stay.
+ * Removes a project from Paseo through the plugin's local daemon connection, because the plugin
+ * SDK has no project removal call. Paseo archives the project's workspaces; files on disk stay.
+ * `hostId` makes the server refuse a project that belongs to another host.
  */
 export const removeProjectRpc = defineRpc({
   name: "project.remove",
-  input: z.object({ projectId: z.string().min(1) }),
+  input: z.object({ projectId: z.string().min(1), hostId: z.string().min(1).optional() }),
   output: z.object({ removedWorkspaceIds: z.array(z.string()) }),
 });
 
 /**
- * The daemon's own server id and project ids, read through the CLI on the daemon host. Unlike the
+ * The daemon's own server id and project ids, read over the local daemon connection. Unlike the
  * client's project list, this answer is never partial: it fails instead.
  */
 export const projectIdsRpc = defineRpc({

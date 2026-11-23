@@ -280,6 +280,12 @@ export function AppearanceSettings({ theme }: PluginSurfaceProps) {
             value={values.showPinned}
             onValueChange={(showPinned) => update({ showPinned })}
           />
+          <SettingsSwitch
+            label={t("settings.relations")}
+            hint={t("settings.relationsHint")}
+            value={values.showRelations}
+            onValueChange={(showRelations) => update({ showRelations })}
+          />
         </SettingsCard>
       </SettingsSection>
 

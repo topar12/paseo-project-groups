@@ -9,7 +9,7 @@ import {
 } from "@getpaseo/plugin/client";
 import { Icon, TextInput } from "@getpaseo/plugin/client/ui";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useDrag, useDragHandle, useDragSlot } from "./drag";
 import { DecorIcon, useDecorations } from "./decor";
 import { useT } from "./i18n";
@@ -17,6 +17,8 @@ import { useLook, type Look } from "./look";
 import { LabelChip, labelKey, useLabelCatalog } from "./labels";
 import { compactTimeAgo, compareWorkspaceTimes, mostUrgent } from "./model";
 import { ProjectIcon } from "./project-icon";
+import { RunningSpinner } from "./running-spinner";
+import { sidebarNavProps } from "./web";
 import type { ProjectGroup } from "../shared/settings";
 
 type Theme = PluginSidebarViewProps["theme"];
@@ -286,7 +288,9 @@ export function GroupHeader({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={t(collapsed ? "common.expand" : "common.collapse", { name: group.name })}
-        accessibilityHint={t("group.dragHint")}
+        accessibilityState={{ expanded: !collapsed }}
+          {...sidebarNavProps({ pgNav: "" })}
+          accessibilityHint={t("group.dragHint")}
         onPress={toggle}
         onLongPress={handle.onLongPress}
         onPressOut={handle.onPressOut}
@@ -422,6 +426,8 @@ export function UngroupedHeader({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={t(collapsed ? "common.expand" : "common.collapse", { name: title })}
+        accessibilityState={{ expanded: !collapsed }}
+        {...sidebarNavProps({ pgNav: "" })}
         onPress={toggle}
         style={styles.header}
       >
@@ -462,7 +468,6 @@ const INDICATOR_COLOR = {
   attention: "statusSuccess",
 } as const;
 
-/** The native spinner animates without re-rendering the workspace row on every frame. */
 export function StatusDot({ color, running = false }: { color: string; running?: boolean }) {
   return (
     <View
@@ -470,12 +475,7 @@ export function StatusDot({ color, running = false }: { color: string; running?:
       style={{ width: 12, height: 12, flexShrink: 0, alignItems: "center", justifyContent: "center" }}
     >
       {running ? (
-        <ActivityIndicator
-          accessible={false}
-          color={color}
-          size="small"
-          style={{ transform: [{ scale: 0.6 }] }}
-        />
+        <RunningSpinner color={color} size={12} />
       ) : (
         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
       )}
@@ -562,12 +562,7 @@ function StatusBadge({
       }}
     >
       {status === "running" ? (
-        <ActivityIndicator
-          accessible={false}
-          color={color}
-          size="small"
-          style={{ transform: [{ scale: 0.5 }] }}
-        />
+        <RunningSpinner color={color} size={10} />
       ) : status === "needs_input" ? (
         <Icon name="CircleAlert" size={11} color={color} />
       ) : (
@@ -615,11 +610,19 @@ export function WorkspaceRow({
   indent,
   view,
   onMenu,
+  relation,
 }: {
   reference: WorkspaceRef;
   indent: number;
   view: PluginSidebarViewProps;
   onMenu: (reference: WorkspaceRef) => void;
+  relation?: {
+    key: string;
+    highlighted: boolean;
+    open(): void;
+    onHover(hovered: boolean): void;
+    trailing: ReactNode;
+  };
 }) {
   const look = useLook();
   const styles = useRowStyles(view.theme);
@@ -652,18 +655,24 @@ export function WorkspaceRow({
     ) : look.trailing === "timestamp" && workspace.enteredAt ? (
       <TimeAgo iso={workspace.enteredAt} style={styles.detail} />
     ) : null;
+  const { flex: _fill, ...titleStyle } = styles.workspaceName;
   return (
     <Pressable
+      {...sidebarNavProps({ pgNav: "", ...(relation ? { pgAgent: relation.key } : {}) })}
       accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       accessibilityLabel={
         workspace.indicatorLabel
           ? t("workspace.openWithStatus", { name: workspace.title, status: workspace.indicatorLabel })
           : t("workspace.open", { name: workspace.title })
       }
-      onPress={open}
-      onHoverIn={hover.onHoverIn}
-      onHoverOut={hover.onHoverOut}
-      style={[styles.row, styles.rounded, { paddingLeft: indent }, active ? styles.selected : null]}
+      onPress={relation?.open ?? open}
+      onHoverIn={() => { hover.onHoverIn(); relation?.onHover(true); }}
+      onHoverOut={() => { hover.onHoverOut(); relation?.onHover(false); }}
+      style={[
+        styles.row, styles.rounded, { paddingLeft: indent },
+        active ? styles.selected : relation?.highlighted && { backgroundColor: view.theme.colors.surface1 },
+      ]}
     >
       {look.showStatusDots ? <StatusDot color={color} running={workspace.indicator === "running"} /> : null}
       <View style={{ flex: 1, minWidth: 0, paddingVertical: branch || labels.length ? 3 : 0 }}>
@@ -671,7 +680,7 @@ export function WorkspaceRow({
           selectable={false}
           numberOfLines={1}
           style={[
-            styles.workspaceName,
+            titleStyle,
             nameColor ? { color: nameColor } : null,
             active || hover.hovered ? { opacity: 1 } : null,
           ]}
@@ -682,6 +691,7 @@ export function WorkspaceRow({
           <MetaLine hostId={reference.hostId} branch={branch} labels={labels} theme={view.theme} />
         ) : null}
       </View>
+      {relation?.trailing}
       <RowActions show={hover.show} slots={1} iconSize={look.icon} detail={trailing}>
         <ActionButton
           icon="Ellipsis"
@@ -771,7 +781,7 @@ export function ProjectBlock({
   view,
   onToggle,
   onMenu,
-  onWorkspaceMenu,
+  renderWorkspace,
   hostLabel = null,
   children,
 }: {
@@ -786,7 +796,7 @@ export function ProjectBlock({
   view: PluginSidebarViewProps;
   onToggle: (key: string) => void;
   onMenu: (reference: ProjectRef) => void;
-  onWorkspaceMenu: (reference: WorkspaceRef) => void;
+  renderWorkspace: (workspace: WorkspaceRef, indent: number) => ReactNode;
   /** Host name shown after the project name when several hosts are connected; null hides it. */
   hostLabel?: string | null;
   /** Sub-project blocks, hidden while folded. */
@@ -843,6 +853,8 @@ export function ProjectBlock({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t(collapsed ? "common.expand" : "common.collapse", { name })}
+          accessibilityState={{ expanded: !collapsed }}
+          {...sidebarNavProps({ pgNav: "" })}
           accessibilityHint={t("project.dragHint")}
           onPress={toggle}
           onLongPress={handle.onLongPress}
@@ -914,15 +926,7 @@ export function ProjectBlock({
       </View>
       {collapsed
         ? null
-        : workspaces.map((workspace) => (
-            <WorkspaceRow
-              key={workspace.key}
-              reference={workspace}
-              indent={look.workspaceIndent + shift}
-              view={view}
-              onMenu={onWorkspaceMenu}
-            />
-          ))}
+        : workspaces.map((workspace) => renderWorkspace(workspace, look.workspaceIndent + shift))}
       {collapsed ? null : children}
     </View>
   );
@@ -958,10 +962,10 @@ export function TextButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      style={[styles.row, styles.rounded, { paddingLeft: 8, paddingRight: 8 }]}
+      style={[styles.row, styles.rounded, { paddingLeft: 8, paddingRight: 8, minWidth: 0 }]}
     >
       <Icon name={icon} size={look.icon} color={muted} />
-      <Text selectable={false} style={styles.detail}>
+      <Text selectable={false} numberOfLines={1} style={[styles.detail, { flexShrink: 1 }]}>
         {label}
       </Text>
     </Pressable>

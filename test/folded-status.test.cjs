@@ -52,12 +52,115 @@ test("mostUrgent follows Paseo's order and ignores unknown values", () => {
   assert.equal(model.mostUrgent(["something-new", "attention"]), "attention");
 });
 
+test("a later running indicator joins the current rotation and the last one stops it", () => {
+  let starts = 0;
+  let stops = 0;
+  const { RunningSpinner } = load("running-spinner.tsx", {
+    react: React,
+    "react/jsx-runtime": require("react/jsx-runtime"),
+    "react-native": {
+      View: "View",
+      Easing: { linear: (value) => value },
+      Platform: { OS: "ios" },
+      Animated: {
+        View: "AnimatedView",
+        Value: class {
+          interpolate() { return { progress: this }; }
+          setValue() {}
+        },
+        timing: (value) => ({ value }),
+        loop: () => ({ start() { starts++; }, stop() { stops++; } }),
+      },
+    },
+    "./web": { animateSpinnerOnWeb: () => assert.fail("Native rings should not use browser animations") },
+  });
+  const list = (ids) => ids.map((id) => React.createElement(RunningSpinner, {
+    key: id,
+    size: id === "badge" ? 10 : 12,
+    color: theme.colors.accent,
+  }));
+  let renderer;
+  act(() => { renderer = create(list(["row"])); });
+  try {
+    const currentRotation = () => renderer.root.findAllByType("AnimatedView")
+      .map((node) => node.props.style[1].transform[0].rotate);
+    const [initialRotation] = currentRotation();
+    act(() => renderer.update(list(["row", "badge"])));
+    const rotations = currentRotation();
+    assert.equal(rotations.length, 2);
+    assert.equal(rotations[0], initialRotation);
+    assert.equal(rotations[1], initialRotation);
+    assert.equal(starts, 1);
+
+    act(() => renderer.update(list(["badge"])));
+    assert.equal(stops, 0);
+    act(() => renderer.update(list([])));
+    assert.equal(stops, 1);
+    act(() => renderer.update(list(["row"])));
+    assert.equal(starts, 2);
+  } finally {
+    act(() => renderer.unmount());
+  }
+  assert.equal(stops, 2);
+});
+
+test("web rings share the document timeline without starting the native loop", () => {
+  const platform = { OS: "web" };
+  const web = load("web.ts", { "react-native": { Platform: platform } });
+  const { RunningSpinner } = load("running-spinner.tsx", {
+    react: React,
+    "react/jsx-runtime": require("react/jsx-runtime"),
+    "react-native": {
+      View: "View",
+      Platform: platform,
+      Animated: {
+        Value: class { interpolate() {} },
+        loop: () => assert.fail("Web rings should not start an Animated loop"),
+      },
+    },
+    "./web": web,
+  });
+  const animations = [];
+  const createNodeMock = () => ({
+    animate(_keyframes, options) {
+      const animation = {
+        startTime: null,
+        duration: options.duration,
+        cancelled: false,
+        cancel() { this.cancelled = true; },
+      };
+      animations.push(animation);
+      return animation;
+    },
+  });
+  const list = (ids) => ids.map((id) => React.createElement(RunningSpinner, {
+    key: id,
+    size: 12,
+    color: theme.colors.accent,
+  }));
+  let renderer;
+  act(() => { renderer = create(list(["first"]), { createNodeMock }); });
+  try {
+    act(() => renderer.update(list(["first", "later"])));
+    assert.equal(animations.length, 2);
+    assert.equal(animations[0].startTime, 0);
+    assert.equal(animations[1].startTime, animations[0].startTime);
+    assert.equal(animations[1].duration, animations[0].duration);
+    act(() => renderer.update(list(["later"])));
+    assert.equal(animations[0].cancelled, true);
+    assert.equal(animations[1].cancelled, false);
+  } finally {
+    act(() => renderer.unmount());
+  }
+  assert.equal(animations[1].cancelled, true);
+});
+
 function render(name, props, { showFoldedStatus, statuses, workspaces = [] }) {
   const queries = [];
   const rows = load("rows.tsx", {
     react: React,
     "react/jsx-runtime": require("react/jsx-runtime"),
-    "react-native": { View: "View", Text: "Text", Pressable: "Pressable", ActivityIndicator: "Spinner" },
+    "react-native": { View: "View", Text: "Text", Pressable: "Pressable" },
     "@getpaseo/plugin/client": {
       useProject: (_ref, selector) => selector({ displayName: "Project" }),
       useWorkspaces: (query) => {
@@ -70,6 +173,7 @@ function render(name, props, { showFoldedStatus, statuses, workspaces = [] }) {
     "./i18n": { useT: () => (key) => key },
     "./model": model,
     "./project-icon": { ProjectIcon: "ProjectIcon" },
+    "./running-spinner": { RunningSpinner: "RunningSpinner" },
     "./labels": { LabelChip: "LabelChip", labelKey: (name) => name.toLowerCase(), useLabelCatalog: () => ({ labels: null, refresh() {} }) },
     "./look": { useLook: () => ({ icon: 13, showFoldedStatus, showPinned: true }) },
     "./drag": {
@@ -81,6 +185,7 @@ function render(name, props, { showFoldedStatus, statuses, workspaces = [] }) {
       DecorIcon: "DecorIcon",
       useDecorations: () => ({ get: () => ({ color: null, icon: null }) }),
     },
+    "./web": { sidebarNavProps: () => ({}) },
   });
   let renderer;
   act(() => {
@@ -198,7 +303,7 @@ test("a folded project rolls up the status of its sub-projects", () => {
     view: { theme, layout: { compact: true }, active: { workspace: null }, navigation: {} },
     onToggle: noop,
     onMenu: noop,
-    onWorkspaceMenu: noop,
+    renderWorkspace: noop,
   };
   const { badges, queries, renderer } = render("ProjectBlock", props, {
     showFoldedStatus: true,
@@ -258,7 +363,7 @@ test("a folded project holding the open workspace in a sub-project gets the fill
     view: { theme, layout: { compact: true }, active: { workspace: { key: "w1" } }, navigation: {} },
     onToggle: noop,
     onMenu: noop,
-    onWorkspaceMenu: noop,
+    renderWorkspace: noop,
   };
   const { fills, renderer } = render("ProjectBlock", props, {
     showFoldedStatus: true,
@@ -399,4 +504,77 @@ test("compact ages match the app's", () => {
   assert.equal(ago(2 * 3_600_000), "2h");
   assert.equal(ago(3 * 86_400_000), "3d");
   assert.equal(model.compactTimeAgo("not a date", now), "");
+});
+
+test("workspace title drops vertical flex and keeps status dot and running ring centered across text sizes", () => {
+  const flatten = (style) => (Array.isArray(style) ? Object.assign({}, ...style.map(flatten)) : (style ?? {}));
+  const lookModule = load("look.tsx", {
+    react: React,
+    "../shared/settings": {
+      appearanceDocument: { schema: { parse: () => ({ textSize: 12, density: "comfortable", indent: "normal", groupSpacing: "small", boldGroupNames: true, showProjectIcons: true, showHostTags: true, showStatusDots: true, showFoldedStatus: true, showDiffStats: true, showBranch: false, showLabels: true, showPinned: true, workspaceSort: "name", workspaceTitle: "title", showBackground: false, language: "auto" }) } },
+    },
+  });
+  for (const textSize of [11, 12, 15]) {
+    const look = lookModule.lookFrom({
+      textSize, density: "comfortable", indent: "normal", groupSpacing: "small",
+      boldGroupNames: true, showProjectIcons: true, showHostTags: true, showStatusDots: true,
+      showFoldedStatus: true, showDiffStats: true, showBranch: false, showLabels: true,
+      showPinned: true, workspaceSort: "name", workspaceTitle: "title", showBackground: false, language: "auto",
+    });
+    for (const indicator of ["running", "attention"]) {
+      const rows = load("rows.tsx", {
+        react: React,
+        "react/jsx-runtime": require("react/jsx-runtime"),
+        "react-native": { View: "View", Text: "Text", Pressable: "Pressable" },
+        "@getpaseo/plugin/client": {
+          useWorkspace: (_ref, selector) => selector({
+            title: "Codeg 内存修复", name: "Codeg 内存修复", branch: null, indicator,
+            indicatorLabel: null, diffStat: null, labels: [], statusEnteredAt: null,
+          }),
+        },
+        "@getpaseo/plugin/client/ui": { Icon: "Icon", TextInput: "Input" },
+        "./i18n": { useT: () => (key) => key },
+        "./model": model,
+        "./project-icon": { ProjectIcon: "ProjectIcon" },
+        "./running-spinner": { RunningSpinner: "RunningSpinner" },
+        "./web": { sidebarNavProps: () => ({}) },
+        "./labels": { LabelChip: "LabelChip", labelKey: (name) => name.toLowerCase(), useLabelCatalog: () => ({ labels: null, refresh() {} }) },
+        "./look": { useLook: () => look },
+        "./drag": { useDrag: () => ({ recentlyDropped: () => false }), useDragSlot: () => null, useDragHandle: () => ({}) },
+        "./decor": { DecorIcon: "DecorIcon", useDecorations: () => ({ get: () => ({ color: null, icon: null }) }) },
+      });
+      let renderer;
+      act(() => {
+        renderer = create(React.createElement(rows.WorkspaceRow, {
+          reference: { key: "h:w1", id: "w1", hostId: "h" },
+          indent: 36,
+          view: { theme, layout: { compact: true, platform: "ios" }, active: { workspace: null }, navigation: { openWorkspace: noop } },
+          onMenu: noop,
+        }));
+      });
+      const titleNode = renderer.root.find((n) => n.type === "Text" && n.props.children === "Codeg 内存修复");
+      const titleStyle = flatten(titleNode.props.style);
+      assert.equal(titleStyle.flex, undefined, `title at ${textSize}pt must not set vertical flex inside column View`);
+      assert.equal(titleStyle.lineHeight, look.line);
+      const dotSlot = renderer.root.find((n) =>
+        n.type === "View" && n.props.pointerEvents === "none" && n.props.style?.width === 12 && n.props.style?.height === 12,
+      );
+      assert.equal(dotSlot.props.style.transform, undefined, "running ring and static dot share centered slot with no fixed translateY");
+      act(() => renderer.unmount());
+    }
+  }
+});
+
+test("relationship lines are on by default, and old saved settings keep them on", () => {
+  const settings = load("../shared/settings.ts", {
+    "@getpaseo/plugin": { defineSettings: (definition) => definition },
+    zod: require("zod"),
+  });
+  const look = load("look.tsx", { react: React, "../shared/settings": settings });
+  // A device that saved its appearance before this setting existed has no `showRelations` key.
+  const saved = settings.appearanceDocument.schema.parse({ textSize: 13, showPinned: false });
+  assert.equal(saved.showRelations, true);
+  assert.equal(look.lookFrom(saved).showRelations, true);
+  const off = settings.appearanceDocument.schema.parse({ showRelations: false });
+  assert.equal(look.lookFrom(off).showRelations, false);
 });

@@ -72,6 +72,11 @@ export const appearanceDocument = defineSettings({
     showBranch: z.boolean().default(false),
     showLabels: z.boolean().default(true),
     showPinned: z.boolean().default(true),
+    /**
+     * In the project view, lines between parent and child agents in other workspaces, the child
+     * count and the family highlight. The "By relation" view does not depend on it.
+     */
+    showRelations: z.boolean().default(true),
     /** Order of workspaces inside a project. Times sort newest first, like the app. */
     workspaceSort: z.enum(WORKSPACE_SORTS).default("name"),
     /** `branch` shows the branch name where the workspace has one. */

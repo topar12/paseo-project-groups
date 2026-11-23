@@ -41,7 +41,9 @@ export function translator(language: Language): Translate {
       text =
         count === undefined
           ? lookup(resource, key)
-          : (lookup(resource, `${key}_${pluralSuffix(language, count)}`) ?? lookup(resource, `${key}_other`));
+          : (lookup(resource, `${key}_${pluralSuffix(language, count)}`) ??
+            lookup(resource, `${key}_other`) ??
+            lookup(resource, key));
       if (text !== undefined) break;
     }
     if (text === undefined) return key;
