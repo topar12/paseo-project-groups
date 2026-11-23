@@ -249,14 +249,16 @@ test("project rows honor the icon visibility setting and keep overrides visible"
     "@getpaseo/plugin/client/ui": { Icon: "Icon" },
     "react-native": { View: "View", Text: "Text", Pressable: "Pressable" },
     "./project-icon": { ProjectIcon: "ProjectIcon" },
+    "./running-spinner": { RunningSpinner: "RunningSpinner" },
     "./labels": { LabelChip: "LabelChip", labelKey: (name) => name.toLowerCase(), useLabelCatalog: () => ({ labels: null, refresh() {} }) },
     "./model": { mostUrgent: () => "done", compareWorkspaceTimes: () => () => 0, compactTimeAgo: () => "" },
     "./i18n": { useT: () => key => key },
     "./look": { useLook: () => ({ showProjectIcons, icon: 13 }) },
     "./decor": { useDecorations: () => ({ get: () => ({ icon: override, color: null }) }) },
     "./drag": { useDrag: () => ({ recentlyDropped: () => false }), useDragSlot: () => null, useDragHandle: () => ({}) },
+    "./web": { sidebarNavProps: () => ({}) },
   });
-  const props = { reference: { key: "host:one", id: "one", hostId: "host" }, nested: false, subProjects: [], collapsed: true, view: { theme: { colors: {} }, layout: { compact: true }, active: { workspace: null }, navigation: {} } };
+  const props = { reference: { key: "host:one", id: "one", hostId: "host" }, nested: false, subProjects: [], collapsed: true, renderWorkspace: () => null, view: { theme: { colors: {} }, layout: { compact: true }, active: { workspace: null }, navigation: {} } };
   let renderer;
   await act(() => { renderer = create(React.createElement(ProjectBlock, props)); });
   t.after(async () => act(() => renderer.unmount()));

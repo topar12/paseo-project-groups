@@ -23,6 +23,7 @@ export interface Look {
   showBranch: boolean;
   showLabels: boolean;
   showPinned: boolean;
+  showRelations: boolean;
   workspaceSort: WorkspaceSort;
   workspaceTitle: WorkspaceTitle;
   showBackground: boolean;
@@ -66,6 +67,7 @@ export function lookFrom(values: AppearanceValues): Look {
     showBranch: values.showBranch,
     showLabels: values.showLabels,
     showPinned: values.showPinned,
+    showRelations: values.showRelations,
     workspaceSort: values.workspaceSort,
     workspaceTitle: values.workspaceTitle,
     showBackground: values.showBackground,
