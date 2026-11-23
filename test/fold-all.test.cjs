@@ -28,6 +28,11 @@ test("collapse all keeps folds that are already there, once each", () => {
   ]);
 });
 
-test("expand all once everything is folded", () => {
-  assert.deepEqual([...model.foldAllKeys([...keys, "p:other/gone"], keys)], []);
+test("expand all once everything shown is folded", () => {
+  assert.deepEqual([...model.foldAllKeys(keys, keys)], []);
+});
+
+test("expand all keeps the folds of projects not shown right now", () => {
+  // A project on a host that is offline is not shown, so it must come back folded.
+  assert.deepEqual([...model.foldAllKeys([...keys, "p:other/gone"], keys)], ["p:other/gone"]);
 });

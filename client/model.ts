@@ -43,12 +43,16 @@ export function compactTimeAgo(iso: string, now: number = Date.now()): string {
 }
 
 /**
- * The fold list after Collapse all / Expand all: everything open once every key is folded, else
- * every key folded. Keys of projects not shown right now stay as they were when folding.
+ * The fold list after Collapse all / Expand all: the shown keys all open once every one is folded,
+ * else all folded. Either way, keys not shown right now (a project on a host that is offline, for
+ * example) keep their fold, so they come back the way they were.
  */
 export function foldAllKeys(collapsed: readonly string[], keys: readonly string[]): string[] {
   const folded = new Set(collapsed);
-  if (keys.every((key) => folded.has(key))) return [];
+  if (keys.every((key) => folded.has(key))) {
+    const shown = new Set(keys);
+    return collapsed.filter((key) => !shown.has(key));
+  }
   return [...new Set([...collapsed, ...keys])];
 }
 
