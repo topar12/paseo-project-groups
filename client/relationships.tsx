@@ -12,7 +12,7 @@ import { useT } from "./i18n";
 import { useLook } from "./look";
 import { relationshipRows, type AgentRelationships } from "./relationship-model";
 import { familyColor, withAlpha } from "./relationship-rail";
-import { StatusDot, WorkspaceRow, useRowStyles } from "./rows";
+import { MetaLine, StatusDot, WorkspaceRow, useRowStyles } from "./rows";
 import { sidebarNavProps } from "./web";
 
 export interface RelationshipActions {
@@ -187,6 +187,7 @@ function AgentRowContent({
   const workspace = useWorkspace(workspaceRef, (item) => ({
     title: (look.workspaceTitle === "branch" ? item.branch : null) ?? item.title ?? item.name,
     project: item.projectDisplayName,
+    branch: item.branch,
     additions: item.diffStat?.additions ?? 0,
     deletions: item.diffStat?.deletions ?? 0,
   }));
@@ -198,6 +199,7 @@ function AgentRowContent({
 
   const singleRoot = (model.byWorkspace.get(workspaceRef.key)?.length ?? 0) === 1;
   const title = agentTitle ?? workspace?.title ?? agent.id;
+  const branch = look.showBranch && workspace?.branch && workspace.branch !== title ? workspace.branch : null;
   const active = isAgentSelected(sidebar, agent, singleRoot ? workspaceRef : undefined);
   const running = status === "running";
   const indicator = running
@@ -257,12 +259,12 @@ function AgentRowContent({
             minWidth: 0,
             alignItems: "center",
             minHeight: look.row,
-            paddingVertical: workspace?.project ? 3 : 0,
+            paddingVertical: workspace?.project || branch ? 3 : 0,
             gap: 5,
           }}
         >
           {look.showStatusDots ? <StatusDot color={indicator} running={running} /> : null}
-          <View style={{ flex: 1, minWidth: 0, gap: workspace?.project ? 1 : 0 }}>
+          <View style={{ flex: 1, minWidth: 0, gap: workspace?.project || branch ? 1 : 0 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
               <Text
                 selectable={false}
@@ -289,6 +291,7 @@ function AgentRowContent({
                 </Text>
               </View>
             ) : null}
+            {branch ? <MetaLine hostId={workspaceRef.hostId} branch={branch} labels={[]} theme={theme} /> : null}
           </View>
         </Pressable>
       </View>

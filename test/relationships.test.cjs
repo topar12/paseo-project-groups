@@ -106,6 +106,7 @@ function makeHarness({
   collapsed = [],
   activeAgent = null,
   activeWorkspace = null,
+  appearance = {},
 } = {}) {
   const workspaceRefCalls = [];
   const openedAgents = [];
@@ -226,7 +227,7 @@ function makeHarness({
       return {
         status: "ready",
         revision: "a1",
-        values: doc.schema.parse({}),
+        values: doc.schema.parse(doc.id === "appearance" ? appearance : {}),
         saving: false,
         saveError: null,
         save: async () => true,
@@ -285,6 +286,7 @@ function makeHarness({
     "@getpaseo/plugin/client/ui": sdkUi,
     "@tanstack/react-query": {
       useQuery: () => ({ data: undefined, isLoading: false, refetch: async () => {} }),
+      useQueryClient: () => ({ invalidateQueries: async () => {} }),
     },
   });
 
@@ -753,6 +755,38 @@ test("By relation view displays clickable tree rows with full project names, no 
   });
   assert.deepEqual(harness.openedAgents, [data.refs.aPerm]);
   assert.equal(harness.scrollCalls.length, 0, "clicking a tree row must not call scrollTo");
+});
+
+test("By relation view shows workspace branch under row only when Branch display setting is on", async (t) => {
+  const data = sampleCrossProjectData();
+
+  const onHarness = makeHarness({
+    projects: data.projects,
+    workspaces: data.workspaces,
+    agents: data.agents,
+    groups: data.groups,
+    appearance: { showBranch: true },
+  });
+  const onRenderer = onHarness.mount();
+  t.after(() => onRenderer && onHarness.unmount());
+  const onToggle = onRenderer.root.findByProps({ accessibilityLabel: "按关系", accessibilityRole: "button" });
+  act(() => onToggle.props.onPress());
+  const repRowOn = onRenderer.root.findByProps({ accessibilityLabel: "打开MOM报表", accessibilityRole: "button" });
+  assert.ok(textOf(repRowOn).includes("feat/reports"), "branch should show under its row when showBranch is on");
+
+  const offHarness = makeHarness({
+    projects: data.projects,
+    workspaces: data.workspaces,
+    agents: data.agents,
+    groups: data.groups,
+    appearance: { showBranch: false },
+  });
+  const offRenderer = offHarness.mount();
+  t.after(() => offRenderer && offHarness.unmount());
+  const offToggle = offRenderer.root.findByProps({ accessibilityLabel: "按关系", accessibilityRole: "button" });
+  act(() => offToggle.props.onPress());
+  const repRowOff = offRenderer.root.findByProps({ accessibilityLabel: "打开MOM报表", accessibilityRole: "button" });
+  assert.ok(!textOf(repRowOff).includes("feat/reports"), "branch should be absent when showBranch is off");
 });
 
 test("always-visible rail uses deterministic family color, promotes active/hovered family, echoes ChildBadge color, and respects collapsed folds", async (t) => {

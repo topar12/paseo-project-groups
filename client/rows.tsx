@@ -707,7 +707,7 @@ export function WorkspaceRow({
 }
 
 /** The line under a workspace name: its branch, then its labels, like the app's meta row. */
-function MetaLine({
+export function MetaLine({
   hostId,
   branch,
   labels,
