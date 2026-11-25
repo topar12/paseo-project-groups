@@ -1,28 +1,9 @@
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const path = require("node:path");
 const { test } = require("node:test");
-const vm = require("node:vm");
-const ts = require("typescript");
+const { createLoader } = require("./helpers/loader.cjs");
 
-function load(file, modules = {}) {
-  const source = readFileSync(path.join(__dirname, "..", "client", file), "utf8");
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  });
-  const exports = {};
-  vm.runInNewContext(outputText, {
-    exports,
-    setTimeout,
-    require(name) {
-      assert.ok(name in modules, `Unexpected import: ${name}`);
-      return modules[name];
-    },
-  });
-  return exports;
-}
-
-const text = load("text.ts");
+const load = createLoader();
+const text = load("client/text.ts");
 const cases = [
   ["👨‍👩‍👧‍👦", 2, "👨‍👩‍👧‍👦"],
   ["🏴󠁧󠁢󠁥󠁮󠁧󠁿x", 1, "🏴󠁧󠁢󠁥󠁮󠁧󠁿"],
@@ -47,9 +28,7 @@ test("the fallback for engines without Intl.Segmenter splits the same way", () =
   }
 });
 
-const { createSettingsSaver, stableJson } = load("save.ts", {
-  react: { useMemo: () => undefined, useRef: () => ({}) },
-});
+const { createSettingsSaver, stableJson } = load("client/save.ts");
 
 /**
  * A settings document that behaves like Paseo's: a save against an old revision fails, and the

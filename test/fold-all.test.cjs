@@ -1,16 +1,8 @@
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const path = require("node:path");
 const { test } = require("node:test");
-const vm = require("node:vm");
-const ts = require("typescript");
+const { createLoader } = require("./helpers/loader.cjs");
 
-const source = readFileSync(path.join(__dirname, "..", "client", "model.ts"), "utf8");
-const { outputText } = ts.transpileModule(source, {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-});
-const model = {};
-vm.runInNewContext(outputText, { exports: model, require: () => ({}) });
+const model = createLoader()("client/model.ts");
 
 const keys = ["g:work", "u", "p:host/app", "p:host/app-api"];
 

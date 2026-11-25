@@ -1,48 +1,12 @@
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const path = require("node:path");
 const { test } = require("node:test");
-const vm = require("node:vm");
 const React = require("react");
 const { act, create } = require("react-test-renderer");
-const ts = require("typescript");
+const { createLoader, flattenStyle, noopDrag, plain, theme } = require("./helpers/loader.cjs");
 
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
-const theme = {
-  colors: {
-    surface0: "#ffffff",
-    foregroundMuted: "#666666",
-    accent: "#008800",
-    statusWarning: "#cc8800",
-    statusDanger: "#cc0000",
-    statusSuccess: "#00aa00",
-    border: "#cccccc",
-  },
-};
 const noop = () => {};
 
-function load(file, modules) {
-  const source = readFileSync(path.join(__dirname, "..", "client", file), "utf8");
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2020,
-      jsx: ts.JsxEmit.ReactJSX,
-    },
-  });
-  const exports = {};
-  vm.runInNewContext(outputText, {
-    exports,
-    require(name) {
-      assert.ok(name in modules, `Unexpected import: ${name}`);
-      return modules[name];
-    },
-  });
-  return exports;
-}
-
-const model = load("model.ts", {});
+const model = createLoader()("client/model.ts");
 
 test("mostUrgent follows Paseo's order and ignores unknown values", () => {
   assert.equal(model.mostUrgent([]), "done");
@@ -55,35 +19,47 @@ test("mostUrgent follows Paseo's order and ignores unknown values", () => {
 test("a later running indicator joins the current rotation and the last one stops it", () => {
   let starts = 0;
   let stops = 0;
-  const { RunningSpinner } = load("running-spinner.tsx", {
-    react: React,
-    "react/jsx-runtime": require("react/jsx-runtime"),
+  const load = createLoader({
     "react-native": {
-      View: "View",
-      Easing: { linear: (value) => value },
       Platform: { OS: "ios" },
       Animated: {
         View: "AnimatedView",
         Value: class {
-          interpolate() { return { progress: this }; }
+          interpolate() {
+            return { progress: this };
+          }
           setValue() {}
         },
         timing: (value) => ({ value }),
-        loop: () => ({ start() { starts++; }, stop() { stops++; } }),
+        loop: () => ({
+          start() {
+            starts++;
+          },
+          stop() {
+            stops++;
+          },
+        }),
       },
     },
-    "./web": { animateSpinnerOnWeb: () => assert.fail("Native rings should not use browser animations") },
+    // Fail explicitly if native rings ever invoke the browser Web Animations helper.
+    "client/web.ts": { animateSpinnerOnWeb: () => assert.fail("Native rings should not use browser animations") },
   });
-  const list = (ids) => ids.map((id) => React.createElement(RunningSpinner, {
-    key: id,
-    size: id === "badge" ? 10 : 12,
-    color: theme.colors.accent,
-  }));
+  const { RunningSpinner } = load("client/running-spinner.tsx");
+  const list = (ids) =>
+    ids.map((id) =>
+      React.createElement(RunningSpinner, {
+        key: id,
+        size: id === "badge" ? 10 : 12,
+        color: theme.colors.accent,
+      }),
+    );
   let renderer;
-  act(() => { renderer = create(list(["row"])); });
+  act(() => {
+    renderer = create(list(["row"]));
+  });
   try {
-    const currentRotation = () => renderer.root.findAllByType("AnimatedView")
-      .map((node) => node.props.style[1].transform[0].rotate);
+    const currentRotation = () =>
+      renderer.root.findAllByType("AnimatedView").map((node) => node.props.style[1].transform[0].rotate);
     const [initialRotation] = currentRotation();
     act(() => renderer.update(list(["row", "badge"])));
     const rotations = currentRotation();
@@ -105,21 +81,18 @@ test("a later running indicator joins the current rotation and the last one stop
 });
 
 test("web rings share the document timeline without starting the native loop", () => {
-  const platform = { OS: "web" };
-  const web = load("web.ts", { "react-native": { Platform: platform } });
-  const { RunningSpinner } = load("running-spinner.tsx", {
-    react: React,
-    "react/jsx-runtime": require("react/jsx-runtime"),
+  const load = createLoader({
     "react-native": {
-      View: "View",
-      Platform: platform,
+      Platform: { OS: "web" },
       Animated: {
-        Value: class { interpolate() {} },
+        Value: class {
+          interpolate() {}
+        },
         loop: () => assert.fail("Web rings should not start an Animated loop"),
       },
     },
-    "./web": web,
   });
+  const { RunningSpinner } = load("client/running-spinner.tsx");
   const animations = [];
   const createNodeMock = () => ({
     animate(_keyframes, options) {
@@ -127,19 +100,26 @@ test("web rings share the document timeline without starting the native loop", (
         startTime: null,
         duration: options.duration,
         cancelled: false,
-        cancel() { this.cancelled = true; },
+        cancel() {
+          this.cancelled = true;
+        },
       };
       animations.push(animation);
       return animation;
     },
   });
-  const list = (ids) => ids.map((id) => React.createElement(RunningSpinner, {
-    key: id,
-    size: 12,
-    color: theme.colors.accent,
-  }));
+  const list = (ids) =>
+    ids.map((id) =>
+      React.createElement(RunningSpinner, {
+        key: id,
+        size: 12,
+        color: theme.colors.accent,
+      }),
+    );
   let renderer;
-  act(() => { renderer = create(list(["first"]), { createNodeMock }); });
+  act(() => {
+    renderer = create(list(["first"]), { createNodeMock });
+  });
   try {
     act(() => renderer.update(list(["first", "later"])));
     assert.equal(animations.length, 2);
@@ -157,39 +137,31 @@ test("web rings share the document timeline without starting the native loop", (
 
 function render(name, props, { showFoldedStatus, statuses, workspaces = [] }) {
   const queries = [];
-  const rows = load("rows.tsx", {
-    react: React,
-    "react/jsx-runtime": require("react/jsx-runtime"),
-    "react-native": { View: "View", Text: "Text", Pressable: "Pressable" },
+  const load = createLoader({
     "@getpaseo/plugin/client": {
-      useProject: (_ref, selector) => selector({ displayName: "Project" }),
+      useProject: (_ref, selector) => selector({ displayName: "Project", iconRevision: null }),
       useWorkspaces: (query) => {
         queries.push(query);
         if (!query.groupBy) return workspaces.filter(query.where).map((item) => item.ref);
         return statuses.map((key) => ({ key, title: null, color: null, items: [] }));
       },
     },
-    "@getpaseo/plugin/client/ui": { Icon: "Icon", TextInput: "Input" },
-    "./i18n": { useT: () => (key) => key },
-    "./model": model,
-    "./project-icon": { ProjectIcon: "ProjectIcon" },
-    "./running-spinner": { RunningSpinner: "RunningSpinner" },
-    "./labels": { LabelChip: "LabelChip", labelKey: (name) => name.toLowerCase(), useLabelCatalog: () => ({ labels: null, refresh() {} }) },
-    "./look": { useLook: () => ({ icon: 13, showFoldedStatus, showPinned: true }) },
-    "./drag": {
-      useDrag: () => ({ recentlyDropped: () => false }),
-      useDragSlot: () => null,
-      useDragHandle: () => ({}),
-    },
-    "./decor": {
-      DecorIcon: "DecorIcon",
-      useDecorations: () => ({ get: () => ({ color: null, icon: null }) }),
-    },
-    "./web": { sidebarNavProps: () => ({}) },
+    // Return message keys directly so badge accessibilityLabel assertions match "status.*".
+    "client/i18n.ts": { useT: () => (key) => key },
   });
+  const rows = load("client/rows.tsx");
+  const { DEFAULT_APPEARANCE, LookContext, lookFrom } = load("client/look.tsx");
+  const { DragProvider } = load("client/drag.tsx");
+  const look = lookFrom({ ...DEFAULT_APPEARANCE, showFoldedStatus, showPinned: true });
   let renderer;
   act(() => {
-    renderer = create(React.createElement(rows[name], props));
+    renderer = create(
+      React.createElement(
+        LookContext.Provider,
+        { value: look },
+        React.createElement(DragProvider, { value: noopDrag }, React.createElement(rows[name], props)),
+      ),
+    );
   });
   const badges = renderer.root.findAll((node) =>
     String(node.props.accessibilityLabel ?? "").startsWith("status."),
@@ -215,7 +187,7 @@ function groupHeader({ collapsed, showFoldedStatus, statuses, active = null, wor
     collapsed,
     renaming: false,
     dragging: false,
-    view: { theme, layout: { compact: true }, active: { workspace: active } },
+    view: { theme, layout: { compact: true, platform: "web" }, active: { workspace: active } },
     onToggle: noop,
     onStartRename: noop,
     onRename: noop,
@@ -276,7 +248,7 @@ test("the folded Ungrouped section shows the status of projects in no group", ()
     projects: ["p1"],
     count: 1,
     collapsed: true,
-    view: { theme, layout: { compact: true }, active: { workspace: null } },
+    view: { theme, layout: { compact: true, platform: "web" }, active: { workspace: null } },
     onToggle: noop,
   };
   const { badges, slots, queries, renderer } = render("UngroupedHeader", props, {
@@ -300,7 +272,7 @@ test("a folded project rolls up the status of its sub-projects", () => {
     subProjects: ["p1-sub"],
     collapsed: true,
     dragging: false,
-    view: { theme, layout: { compact: true }, active: { workspace: null }, navigation: {} },
+    view: { theme, layout: { compact: true, platform: "web" }, active: { workspace: null }, navigation: {} },
     onToggle: noop,
     onMenu: noop,
     renderWorkspace: noop,
@@ -360,7 +332,7 @@ test("a folded project holding the open workspace in a sub-project gets the fill
     subProjects: ["p1-sub"],
     collapsed: true,
     dragging: false,
-    view: { theme, layout: { compact: true }, active: { workspace: { key: "w1" } }, navigation: {} },
+    view: { theme, layout: { compact: true, platform: "web" }, active: { workspace: { key: "w1" } }, navigation: {} },
     onToggle: noop,
     onMenu: noop,
     renderWorkspace: noop,
@@ -373,9 +345,6 @@ test("a folded project holding the open workspace in a sub-project gets the fill
   assert.equal(fills.length, 1);
   act(() => renderer.unmount());
 });
-
-// The model runs in its own VM context; compare plain copies of its objects.
-const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test("subProjects keeps one level and ignores links to missing projects", () => {
   const order = ["a", "b", "c", "d", "e"];
@@ -477,7 +446,6 @@ test("sectionOf finds a sub-project's section through its parent", () => {
   assert.equal(model.sectionOf(layout, "zzz"), undefined);
 });
 
-
 test("project settings path matches the app's route", () => {
   assert.equal(
     model.projectSettingsPath({ hostId: "srv_a b", id: "prj/1" }),
@@ -507,70 +475,65 @@ test("compact ages match the app's", () => {
 });
 
 test("workspace title drops vertical flex and keeps status dot and running ring centered across text sizes", () => {
-  const flatten = (style) => (Array.isArray(style) ? Object.assign({}, ...style.map(flatten)) : (style ?? {}));
-  const lookModule = load("look.tsx", {
-    react: React,
-    "../shared/settings": {
-      appearanceDocument: { schema: { parse: () => ({ textSize: 12, density: "comfortable", indent: "normal", groupSpacing: "small", boldGroupNames: true, showProjectIcons: true, showHostTags: true, showStatusDots: true, showFoldedStatus: true, showDiffStats: true, showBranch: false, showLabels: true, showPinned: true, workspaceSort: "name", workspaceTitle: "title", showBackground: false, language: "auto" }) } },
-    },
-  });
   for (const textSize of [11, 12, 15]) {
-    const look = lookModule.lookFrom({
-      textSize, density: "comfortable", indent: "normal", groupSpacing: "small",
-      boldGroupNames: true, showProjectIcons: true, showHostTags: true, showStatusDots: true,
-      showFoldedStatus: true, showDiffStats: true, showBranch: false, showLabels: true,
-      showPinned: true, workspaceSort: "name", workspaceTitle: "title", showBackground: false, language: "auto",
-    });
     for (const indicator of ["running", "attention"]) {
-      const rows = load("rows.tsx", {
-        react: React,
-        "react/jsx-runtime": require("react/jsx-runtime"),
-        "react-native": { View: "View", Text: "Text", Pressable: "Pressable" },
+      const load = createLoader({
         "@getpaseo/plugin/client": {
-          useWorkspace: (_ref, selector) => selector({
-            title: "Codeg 内存修复", name: "Codeg 内存修复", branch: null, indicator,
-            indicatorLabel: null, diffStat: null, labels: [], statusEnteredAt: null,
-          }),
+          useWorkspace: (_ref, selector) =>
+            selector({
+              title: "Codeg 内存修复",
+              name: "Codeg 内存修复",
+              branch: null,
+              indicator,
+              indicatorLabel: null,
+              diffStat: null,
+              labels: [],
+              statusEnteredAt: null,
+            }),
         },
-        "@getpaseo/plugin/client/ui": { Icon: "Icon", TextInput: "Input" },
-        "./i18n": { useT: () => (key) => key },
-        "./model": model,
-        "./project-icon": { ProjectIcon: "ProjectIcon" },
-        "./running-spinner": { RunningSpinner: "RunningSpinner" },
-        "./web": { sidebarNavProps: () => ({}) },
-        "./labels": { LabelChip: "LabelChip", labelKey: (name) => name.toLowerCase(), useLabelCatalog: () => ({ labels: null, refresh() {} }) },
-        "./look": { useLook: () => look },
-        "./drag": { useDrag: () => ({ recentlyDropped: () => false }), useDragSlot: () => null, useDragHandle: () => ({}) },
-        "./decor": { DecorIcon: "DecorIcon", useDecorations: () => ({ get: () => ({ color: null, icon: null }) }) },
       });
+      const { DEFAULT_APPEARANCE, LookContext, lookFrom } = load("client/look.tsx");
+      const rows = load("client/rows.tsx");
+      const look = lookFrom({ ...DEFAULT_APPEARANCE, textSize });
       let renderer;
       act(() => {
-        renderer = create(React.createElement(rows.WorkspaceRow, {
-          reference: { key: "h:w1", id: "w1", hostId: "h" },
-          indent: 36,
-          view: { theme, layout: { compact: true, platform: "ios" }, active: { workspace: null }, navigation: { openWorkspace: noop } },
-          onMenu: noop,
-        }));
+        renderer = create(
+          React.createElement(
+            LookContext.Provider,
+            { value: look },
+            React.createElement(rows.WorkspaceRow, {
+              reference: { key: "h:w1", id: "w1", hostId: "h" },
+              indent: 36,
+              view: {
+                theme,
+                layout: { compact: true, platform: "ios" },
+                active: { workspace: null },
+                navigation: { openWorkspace: noop },
+              },
+              onMenu: noop,
+            }),
+          ),
+        );
       });
       const titleNode = renderer.root.find((n) => n.type === "Text" && n.props.children === "Codeg 内存修复");
-      const titleStyle = flatten(titleNode.props.style);
+      const titleStyle = flattenStyle(titleNode.props.style);
       assert.equal(titleStyle.flex, undefined, `title at ${textSize}pt must not set vertical flex inside column View`);
       assert.equal(titleStyle.lineHeight, look.line);
-      const dotSlot = renderer.root.find((n) =>
-        n.type === "View" && n.props.pointerEvents === "none" && n.props.style?.width === 12 && n.props.style?.height === 12,
+      const dotSlot = renderer.root.findByType(rows.StatusDot).findByType("View");
+      assert.equal(
+        dotSlot.props.style.transform,
+        undefined,
+        "running ring and static dot share centered slot with no fixed translateY",
       );
-      assert.equal(dotSlot.props.style.transform, undefined, "running ring and static dot share centered slot with no fixed translateY");
       act(() => renderer.unmount());
     }
   }
 });
 
 test("relationship lines are on by default, and old saved settings keep them on", () => {
-  const settings = load("../shared/settings.ts", {
-    "@getpaseo/plugin": { defineSettings: (definition) => definition },
-    zod: require("zod"),
-  });
-  const look = load("look.tsx", { react: React, "../shared/settings": settings });
+  const load = createLoader();
+  const settings = load("shared/settings.ts");
+  const look = load("client/look.tsx");
   // A device that saved its appearance before this setting existed has no `showRelations` key.
   const saved = settings.appearanceDocument.schema.parse({ textSize: 13, showPinned: false });
   assert.equal(saved.showRelations, true);

@@ -1,44 +1,10 @@
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const path = require("node:path");
 const { test } = require("node:test");
-const vm = require("node:vm");
 const React = require("react");
 const { act, create } = require("react-test-renderer");
-const ts = require("typescript");
+const { createLoader } = require("./helpers/loader.cjs");
 
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
-function load(file, modules) {
-  const source = readFileSync(path.join(__dirname, "..", "client", file), "utf8");
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2020,
-      jsx: ts.JsxEmit.ReactJSX,
-    },
-  });
-  const exports = {};
-  vm.runInNewContext(outputText, {
-    exports,
-    setTimeout,
-    require(name) {
-      assert.ok(name in modules, `Unexpected import: ${name}`);
-      return modules[name];
-    },
-  });
-  return exports;
-}
-
-const drag = load("drag.tsx", {
-  react: React,
-  "react-native": {
-    Animated: { Value: class {} },
-    PanResponder: { create: () => ({ panHandlers: {} }) },
-    Platform: { OS: "web" },
-  },
-  "./hit": {},
-});
+const drag = createLoader()("client/drag.tsx");
 
 /** Renders a row's drag handle with a fake controller. Returns the handle and the press count. */
 function mount({ mouse, dragging = () => false }) {

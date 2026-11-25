@@ -1,82 +1,20 @@
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const path = require("node:path");
 const { test } = require("node:test");
-const vm = require("node:vm");
 const React = require("react");
 const { act, create } = require("react-test-renderer");
-const ts = require("typescript");
+const { createLoader, noopDrag, theme } = require("./helpers/loader.cjs");
 
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
-const theme = {
-  colors: {
-    foreground: "#111111",
-    foregroundMuted: "#666666",
-    accent: "#008800",
-    accentForeground: "#ffffff",
-    border: "#cccccc",
-    surface1: "#eeeeee",
-    surface2: "#dddddd",
-  },
-};
-const view = { theme, layout: { compact: true }, active: { workspace: null } };
+const view = { theme, layout: { compact: true, platform: "web" }, active: { workspace: null } };
 const noop = () => {};
-const Modal = ({ children }) => React.createElement("Modal", null, children);
-Modal.Content = ({ children }) => React.createElement("ModalContent", null, children);
 
-// Render the real plugin components; only platform UI and host services are substituted.
-function loadClient(file, host = {}) {
-  const modules = {
-    react: React,
-    "react/jsx-runtime": require("react/jsx-runtime"),
-    "react-native": {
-      View: "View",
-      Text: "Text",
-      Pressable: "Pressable",
-      TextInput: "NativeInput",
-    },
+function makeClientLoader(host = {}) {
+  return createLoader({
+    "react-native": { TextInput: "NativeInput" },
     "@getpaseo/plugin/client": host,
-    "@getpaseo/plugin/client/ui": {
-      Icon: "Icon",
-      TextInput: "SheetAwareInput",
-      Modal,
-      useToast: () => ({ show: noop, error: noop }),
-    },
-    "./i18n": { useT: () => (key) => key },
-    "./model": { mostUrgent: () => "done", compareWorkspaceTimes: () => () => 0, compactTimeAgo: () => "" },
-    "./project-icon": { ProjectIcon: "ProjectIcon" },
-    "./running-spinner": { RunningSpinner: "RunningSpinner" },
-    "./labels": { LabelChip: "LabelChip", labelKey: (name) => name.toLowerCase(), useLabelCatalog: () => ({ labels: null, refresh() {} }) },
-    "./look": { useLook: () => ({ icon: 13, text: 12, line: 16, small: 11 }) },
-    "../shared/rpc": { markWorkspaceRpc: {} },
-    "./drag": {
-      useDrag: () => ({ recentlyDropped: () => false }),
-      useDragSlot: () => null,
-      useDragHandle: () => ({}),
-    },
-    "./decor": {
-      useDecorations: () => ({ get: () => ({ color: null, icon: null }) }),
-    },
-    "./web": { sidebarNavProps: () => ({}) },
-  };
-  const source = readFileSync(path.join(__dirname, "..", "client", file), "utf8");
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2020,
-      jsx: ts.JsxEmit.ReactJSX,
-    },
+    "@getpaseo/plugin/client/ui": { TextInput: "SheetAwareInput" },
+    // Return message keys directly so existing button label assertions stay locale-independent.
+    "client/i18n.ts": { useT: () => (key) => key },
   });
-  const exports = {};
-  vm.runInNewContext(outputText, {
-    exports,
-    require(name) {
-      assert.ok(name in modules, `Unexpected import: ${name}`);
-      return modules[name];
-    },
-  });
-  return exports;
 }
 
 const inputOf = (renderer) =>
@@ -95,7 +33,7 @@ async function workspaceEditor(onRender = noop, overrides = {}) {
     worktree: false,
     ...overrides,
   };
-  const { WorkspaceMenuDialog } = loadClient("dialogs.tsx", {
+  const load = makeClientLoader({
     useWorkspace: (_reference, _selector) => workspace,
     useRpc: () => async () => ({ done: true }),
     usePaseo: () => ({
@@ -108,6 +46,7 @@ async function workspaceEditor(onRender = noop, overrides = {}) {
       },
     }),
   });
+  const { WorkspaceMenuDialog } = load("client/dialogs.tsx");
   const props = {
     reference: { id: "workspace", key: "workspace" },
     theme,
@@ -116,8 +55,11 @@ async function workspaceEditor(onRender = noop, overrides = {}) {
     onArchived: noop,
   };
   const element = (nextProps = props) =>
-    React.createElement(React.Profiler, { id: "rename", onRender },
-      React.createElement(WorkspaceMenuDialog, nextProps));
+    React.createElement(
+      React.Profiler,
+      { id: "rename", onRender },
+      React.createElement(WorkspaceMenuDialog, nextProps),
+    );
   let renderer;
   await act(() => {
     renderer = create(element());
@@ -194,7 +136,9 @@ test("workspace cancel does not save the draft", async (t) => {
 });
 
 test("group rename preserves composition and saves the latest text on blur", async (t) => {
-  const { GroupHeader } = loadClient("rows.tsx", { useWorkspaces: () => [] });
+  const load = makeClientLoader({ useWorkspaces: () => [] });
+  const { GroupHeader } = load("client/rows.tsx");
+  const { DragProvider } = load("client/drag.tsx");
   const renamed = [];
   const props = {
     group: { id: "group", name: "Original", projects: [] },
@@ -210,9 +154,10 @@ test("group rename preserves composition and saves the latest text on blur", asy
     onCancelRename: noop,
     onDelete: noop,
   };
+  const render = (p) => React.createElement(DragProvider, { value: noopDrag }, React.createElement(GroupHeader, p));
   let renderer;
   await act(() => {
-    renderer = create(React.createElement(GroupHeader, props));
+    renderer = create(render(props));
   });
   t.after(async () => act(() => renderer.unmount()));
   const input = inputOf(renderer);
@@ -220,7 +165,7 @@ test("group rename preserves composition and saves the latest text on blur", asy
   assert.equal(input.type, "SheetAwareInput");
   for (const text of ["gong", "工作", "工作 项目🚀"]) {
     await act(() => input.props.onChangeText(text));
-    await act(() => renderer.update(React.createElement(GroupHeader, { ...props, count: 1 })));
+    await act(() => renderer.update(render({ ...props, count: 1 })));
     assert.equal(inputOf(renderer), input, "The editing input must stay mounted");
     assert.equal(input.props.defaultValue, "Original");
     assert.equal(input.props.value, undefined);
@@ -230,7 +175,10 @@ test("group rename preserves composition and saves the latest text on blur", asy
 });
 
 test("group rename starts with the current name and Return saves the new draft", async (t) => {
-  const { GroupHeader } = loadClient("rows.tsx", { useWorkspaces: () => [] });
+  const load = makeClientLoader({ useWorkspaces: () => [] });
+  const { GroupHeader } = load("client/rows.tsx");
+  const { DragProvider } = load("client/drag.tsx");
+  const render = (p) => React.createElement(DragProvider, { value: noopDrag }, React.createElement(GroupHeader, p));
   let props;
   let renderer;
   const renamed = [];
@@ -245,19 +193,19 @@ test("group rename starts with the current name and Return saves the new draft",
     onToggle: noop,
     onStartRename: () => {
       props = { ...props, renaming: true };
-      renderer.update(React.createElement(GroupHeader, props));
+      renderer.update(render(props));
     },
     onRename: (id, name) => renamed.push([id, name]),
     onCancelRename: noop,
     onDelete: noop,
   };
   await act(() => {
-    renderer = create(React.createElement(GroupHeader, props));
+    renderer = create(render(props));
   });
   t.after(async () => act(() => renderer.unmount()));
   // A remote rename before editing must seed both the display and the saved draft.
   props = { ...props, group: { ...props.group, name: "新名称" } };
-  await act(() => renderer.update(React.createElement(GroupHeader, props)));
+  await act(() => renderer.update(render(props)));
   await act(() => button(renderer, "group.rename").props.onPress());
   assert.equal(inputOf(renderer).props.defaultValue, "新名称");
   await act(() => inputOf(renderer).props.onChangeText("新的分组"));
