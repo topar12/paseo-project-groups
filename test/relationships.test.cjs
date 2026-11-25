@@ -106,6 +106,7 @@ function makeHarness({
   collapsed = [],
   activeAgent = null,
   activeWorkspace = null,
+  appearance = {},
 } = {}) {
   const workspaceRefCalls = [];
   const openedAgents = [];
@@ -226,7 +227,7 @@ function makeHarness({
       return {
         status: "ready",
         revision: "a1",
-        values: doc.schema.parse({}),
+        values: doc.schema.parse(doc.id === "appearance" ? appearance : {}),
         saving: false,
         saveError: null,
         save: async () => true,
@@ -285,6 +286,7 @@ function makeHarness({
     "@getpaseo/plugin/client/ui": sdkUi,
     "@tanstack/react-query": {
       useQuery: () => ({ data: undefined, isLoading: false, refetch: async () => {} }),
+      useQueryClient: () => ({ invalidateQueries: async () => {} }),
     },
   });
 
@@ -753,6 +755,41 @@ test("By relation view displays clickable tree rows with full project names, no 
   });
   assert.deepEqual(harness.openedAgents, [data.refs.aPerm]);
   assert.equal(harness.scrollCalls.length, 0, "clicking a tree row must not call scrollTo");
+});
+
+test("By relation view shows workspace labels only when Labels display setting is on", async (t) => {
+  const withLabels = sampleCrossProjectData();
+  withLabels.workspaces[1].labels = ["urgent"];
+
+  const shownHarness = makeHarness({
+    projects: withLabels.projects,
+    workspaces: withLabels.workspaces,
+    agents: withLabels.agents,
+    groups: withLabels.groups,
+    appearance: { showLabels: true },
+  });
+  const shownRenderer = shownHarness.mount();
+  t.after(() => shownHarness.unmount());
+
+  act(() => {
+    shownRenderer.root.findByProps({ accessibilityLabel: "按关系", accessibilityRole: "button" }).props.onPress();
+  });
+  assert.ok(textOf(shownRenderer.toJSON()).includes("urgent"), "label chip shows in By relation when showLabels is true");
+
+  const hiddenHarness = makeHarness({
+    projects: withLabels.projects,
+    workspaces: withLabels.workspaces,
+    agents: withLabels.agents,
+    groups: withLabels.groups,
+    appearance: { showLabels: false },
+  });
+  const hiddenRenderer = hiddenHarness.mount();
+  t.after(() => hiddenHarness.unmount());
+
+  act(() => {
+    hiddenRenderer.root.findByProps({ accessibilityLabel: "按关系", accessibilityRole: "button" }).props.onPress();
+  });
+  assert.equal(textOf(hiddenRenderer.toJSON()).includes("urgent"), false, "label chip is hidden in By relation when showLabels is false");
 });
 
 test("always-visible rail uses deterministic family color, promotes active/hovered family, echoes ChildBadge color, and respects collapsed folds", async (t) => {

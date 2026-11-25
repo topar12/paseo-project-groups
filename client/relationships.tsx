@@ -12,7 +12,7 @@ import { useT } from "./i18n";
 import { useLook } from "./look";
 import { relationshipRows, type AgentRelationships } from "./relationship-model";
 import { familyColor, withAlpha } from "./relationship-rail";
-import { StatusDot, WorkspaceRow, useRowStyles } from "./rows";
+import { MetaLine, StatusDot, WorkspaceRow, useRowStyles } from "./rows";
 import { sidebarNavProps } from "./web";
 
 export interface RelationshipActions {
@@ -187,6 +187,7 @@ function AgentRowContent({
   const workspace = useWorkspace(workspaceRef, (item) => ({
     title: (look.workspaceTitle === "branch" ? item.branch : null) ?? item.title ?? item.name,
     project: item.projectDisplayName,
+    labels: item.labels,
     additions: item.diffStat?.additions ?? 0,
     deletions: item.diffStat?.deletions ?? 0,
   }));
@@ -207,6 +208,7 @@ function AgentRowContent({
       : requiresAttention
         ? theme.colors.statusWarning
         : "transparent";
+  const labels = look.showLabels && workspace ? workspace.labels : [];
   const showDiff = look.trailing === "diff" && ((workspace?.additions ?? 0) > 0 || (workspace?.deletions ?? 0) > 0);
   const lineColor = sidebar.highlighted.has(agent.key) ? theme.colors.accent : theme.colors.border;
 
@@ -257,12 +259,12 @@ function AgentRowContent({
             minWidth: 0,
             alignItems: "center",
             minHeight: look.row,
-            paddingVertical: workspace?.project ? 3 : 0,
+            paddingVertical: workspace?.project || labels.length ? 3 : 0,
             gap: 5,
           }}
         >
           {look.showStatusDots ? <StatusDot color={indicator} running={running} /> : null}
-          <View style={{ flex: 1, minWidth: 0, gap: workspace?.project ? 1 : 0 }}>
+          <View style={{ flex: 1, minWidth: 0, gap: workspace?.project || labels.length ? 1 : 0 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 }}>
               <Text
                 selectable={false}
@@ -288,6 +290,9 @@ function AgentRowContent({
                   {workspace.project}
                 </Text>
               </View>
+            ) : null}
+            {labels.length ? (
+              <MetaLine hostId={workspaceRef.hostId} branch={null} labels={labels} theme={theme} />
             ) : null}
           </View>
         </Pressable>
