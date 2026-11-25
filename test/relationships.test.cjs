@@ -106,6 +106,7 @@ function makeHarness({
   collapsed = [],
   activeAgent = null,
   activeWorkspace = null,
+  appearance = {},
 } = {}) {
   const workspaceRefCalls = [];
   const openedAgents = [];
@@ -226,7 +227,7 @@ function makeHarness({
       return {
         status: "ready",
         revision: "a1",
-        values: doc.schema.parse({}),
+        values: doc.schema.parse(doc.id === "appearance" ? appearance : {}),
         saving: false,
         saveError: null,
         save: async () => true,
@@ -753,6 +754,53 @@ test("By relation view displays clickable tree rows with full project names, no 
   });
   assert.deepEqual(harness.openedAgents, [data.refs.aPerm]);
   assert.equal(harness.scrollCalls.length, 0, "clicking a tree row must not call scrollTo");
+});
+
+test("By relation uses branch title for single-agent workspaces when Title is Branch and falls back when branch is null", (t) => {
+  const data = sampleCrossProjectData();
+  data.workspaces[3].branch = null;
+  const wShared = ref("workspace", "host-a", "ws-shared");
+  const aShared1 = ref("agent", "host-a", "ag-shared-1");
+  const aShared2 = ref("agent", "host-a", "ag-shared-2");
+  data.workspaces.push({
+    ref: wShared, hostId: "host-a", project: data.refs.pGroups, pinnedAt: null, labels: [], background: false,
+    branch: "feat/shared", createdAt: "2026-01-05T00:00:00Z", lastPromptAt: null, parentAgent: null,
+    indicator: "done", indicatorLabel: null, id: "ws-shared", projectId: "paseo-project-groups",
+    projectDisplayName: "paseo-project-groups", name: "Shared WS", title: "Shared WS",
+    status: "done", statusEnteredAt: null, archivingAt: null, diffStat: null,
+  });
+  data.agents.push(
+    {
+      ref: aShared1, hostId: "host-a", workspace: wShared, parentAgent: null, id: "ag-shared-1", workspaceId: "ws-shared",
+      status: "idle", background: false, createdAt: "2026-01-05T00:00:00Z", title: "Shared Agent 1", requiresAttention: false,
+    },
+    {
+      ref: aShared2, hostId: "host-a", workspace: wShared, parentAgent: null, id: "ag-shared-2", workspaceId: "ws-shared",
+      status: "idle", background: false, createdAt: "2026-01-06T00:00:00Z", title: "Shared Agent 2", requiresAttention: false,
+    },
+  );
+
+  const harness = makeHarness({
+    projects: data.projects,
+    workspaces: data.workspaces,
+    agents: data.agents,
+    groups: data.groups,
+    appearance: { workspaceTitle: "branch" },
+  });
+  const renderer = harness.mount();
+  t.after(() => harness.unmount());
+
+  const relToggle = renderer.root.findByProps({ accessibilityLabel: "按关系", accessibilityRole: "button" });
+  act(() => relToggle.props.onPress());
+
+  const treeText = textOf(renderer.toJSON());
+  assert.ok(treeText.includes("feat/reports"), "single-agent workspace shows its branch");
+  assert.ok(treeText.includes("feat/perm"), "cross-host single-agent workspace shows its branch");
+  assert.ok(!treeText.includes("MOM报表"), "branch replaces agent title on single-agent workspace");
+  assert.ok(!treeText.includes("MOM 权限工作台"), "branch replaces agent title on cross-host single-agent workspace");
+  assert.ok(treeText.includes("项目分组插件"), "single-agent workspace with branch: null keeps its title");
+  assert.ok(treeText.includes("Shared Agent 1") && treeText.includes("Shared Agent 2"), "agents sharing a workspace keep their own titles");
+  assert.ok(!treeText.includes("feat/shared"), "shared workspace does not replace agent titles with branch");
 });
 
 test("always-visible rail uses deterministic family color, promotes active/hovered family, echoes ChildBadge color, and respects collapsed folds", async (t) => {

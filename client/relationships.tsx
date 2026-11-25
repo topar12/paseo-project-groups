@@ -186,6 +186,7 @@ function AgentRowContent({
   const look = useLook();
   const workspace = useWorkspace(workspaceRef, (item) => ({
     title: (look.workspaceTitle === "branch" ? item.branch : null) ?? item.title ?? item.name,
+    branch: item.branch,
     project: item.projectDisplayName,
     additions: item.diffStat?.additions ?? 0,
     deletions: item.diffStat?.deletions ?? 0,
@@ -197,7 +198,12 @@ function AgentRowContent({
   const styles = useRowStyles(theme);
 
   const singleRoot = (model.byWorkspace.get(workspaceRef.key)?.length ?? 0) === 1;
-  const title = agentTitle ?? workspace?.title ?? agent.id;
+  // Single-agent workspaces follow the Branch title setting just like By project.
+  const title =
+    (look.workspaceTitle === "branch" && singleRoot && workspace?.branch ? workspace.branch : null) ??
+    agentTitle ??
+    workspace?.title ??
+    agent.id;
   const active = isAgentSelected(sidebar, agent, singleRoot ? workspaceRef : undefined);
   const running = status === "running";
   const indicator = running
