@@ -59,7 +59,7 @@ An agent can start sub-agents in other workspaces, even in other projects. Group
 - Sub-agents in the parent's own workspace are tabs of that workspace, so the sidebar doesn't list them separately.
 - To hide the lines, the child count and the highlight, turn off **Relationship lines** in the settings.
 
-**By relation** at the top of the sidebar shows every agent as a tree instead: each parent with its children under it, and the project name under each agent. **By project** goes back to the groups. The sidebar always opens **By project**.
+**By relation** at the top of the sidebar shows every agent as a tree instead: each parent with its children under it, and the project name under each agent. It follows the same Sort and status dots as the project view. **By project** goes back to the groups. The sidebar always opens **By project**.
 
 In the desktop app and in a browser, the keyboard can move through the list. When a sidebar row has keyboard focus:
 
